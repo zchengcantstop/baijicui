@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0414">
+<title>LOVE.EXE — 柏吉翠，我爱你</title>
+<style>
+  :root {
+    --bg: #0a0414;
+    --pink: #ff5fa2;
+    --pink-hi: #ffb3d4;
+    --pink-dim: #b0285e;
+    --deep: #1a0a26;
+    --yellow: #ffd93b;
+    --cyan: #5ff2ff;
+    --px: 'SimHei', 'Heiti SC', 'STHeiti', 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    color: #fff;
+    font-family: var(--px);
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    overscroll-behavior: none;
+  }
+
+  /* ---------- 背景层 ---------- */
+  #starfield {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    z-index: 0;
+  }
+
+  .floor {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    height: 42%;
+    z-index: 0;
+    pointer-events: none;
+    background:
+      repeating-linear-gradient(90deg, rgba(255,95,162,.22) 0 2px, transparent 2px 64px),
+      repeating-linear-gradient(0deg, rgba(255,95,162,.16) 0 2px, transparent 2px 48px);
+    transform: perspective(260px) rotateX(58deg);
+    transform-origin: bottom center;
+    mask-image: linear-gradient(to top, #000 5%, transparent 92%);
+    -webkit-mask-image: linear-gradient(to top, #000 5%, transparent 92%);
+    animation: floorRun 1.6s linear infinite;
+  }
+  @keyframes floorRun {
+    from { background-position: 0 0, 0 0; }
+    to   { background-position: 0 0, 0 48px; }
+  }
+
+  /* ---------- 主标题 ---------- */
+  .hero {
+    position: fixed;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.1rem;
+    text-align: center;
+    padding: 1.2rem;
+    pointer-events: none;
+  }
+
+  .marquee-head {
+    width: min(88vw, 560px);
+    overflow: hidden;
+    border-top: 3px solid var(--pink-dim);
+    border-bottom: 3px solid var(--pink-dim);
+    padding: .5rem 0;
+    font-size: clamp(.62rem, 2.6vw, .85rem);
+    letter-spacing: .22em;
+    color: var(--pink-hi);
+    white-space: nowrap;
+    text-shadow: 2px 2px 0 var(--pink-dim);
+  }
+  .marquee-head span {
+    display: inline-block;
+    white-space: nowrap;
+    animation: ticker 18s linear infinite;
+  }
+  @keyframes ticker {
+    from { transform: translateX(0); }
+    to   { transform: translateX(-50%); }
+  }
+
+  .hero-card {
+    position: relative;
+    width: min(90vw, 620px);
+    background: var(--deep);
+    border: 4px solid var(--pink);
+    box-shadow:
+      0 0 0 4px #000,
+      10px 10px 0 0 rgba(0, 0, 0, .65),
+      0 0 34px rgba(255, 95, 162, .5),
+      inset 0 0 0 2px rgba(255, 179, 212, .25);
+    padding: clamp(1.1rem, 4.5vw, 2rem) clamp(.9rem, 4vw, 1.8rem);
+  }
+
+  .hero-card .bar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .6rem;
+    padding: .38rem .6rem;
+    background: var(--pink);
+    color: #190513;
+    font-size: clamp(.55rem, 2.2vw, .72rem);
+    font-weight: 900;
+    letter-spacing: .12em;
+  }
+  .hero-card .bar i {
+    font-style: normal;
+    display: inline-flex;
+    gap: .28rem;
+  }
+  .hero-card .bar b {
+    display: block;
+    width: .62em;
+    height: .62em;
+    background: #190513;
+  }
+  .hero-card .bar b:nth-child(2) { opacity: .55; }
+
+  .hero-inner { margin-top: 1.35rem; }
+
+  .love-line {
+    font-size: clamp(1.55rem, 7.6vw, 3.6rem);
+    font-weight: 900;
+    line-height: 1.25;
+    letter-spacing: .04em;
+    color: #fff;
+    text-shadow:
+      3px 3px 0 var(--pink),
+      6px 6px 0 var(--pink-dim),
+      0 0 22px rgba(255, 95, 162, .55);
+  }
+  .love-line .name { color: var(--pink-hi); }
+  .caret {
+    display: inline-block;
+    width: .38em;
+    height: .92em;
+    margin-left: .1em;
+    vertical-align: -0.06em;
+    background: var(--pink);
+    animation: blink .9s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .sub-line {
+    margin-top: .9rem;
+    font-size: clamp(.58rem, 2.4vw, .8rem);
+    letter-spacing: .3em;
+    color: var(--cyan);
+    text-shadow: 2px 2px 0 rgba(0, 0, 0, .8);
+  }
+
+  .press-start {
+    font-size: clamp(.6rem, 2.6vw, .84rem);
+    letter-spacing: .18em;
+    color: var(--yellow);
+    text-shadow: 2px 2px 0 #6b3d00;
+    animation: blink 1.3s steps(1) infinite;
+  }
+
+  .hero-foot {
+    font-size: clamp(.52rem, 2.1vw, .68rem);
+    letter-spacing: .14em;
+    color: rgba(255, 179, 212, .55);
+  }
+
+  /* ---------- 弹窗层 ---------- */
+  #popups {
+    position: fixed;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  .popup {
+    position: absolute;
+    left: 0;
+    top: 0;
+    background: var(--deep);
+    border: 3px solid var(--pink);
+    box-shadow:
+      0 0 0 3px #000,
+      6px 6px 0 0 rgba(0, 0, 0, .72),
+      0 0 20px rgba(255, 95, 162, .38);
+    transform-origin: 50% 90%;
+    will-change: transform, opacity;
+    animation: popLife var(--life, 4300ms) cubic-bezier(.2, .9, .25, 1) forwards;
+    contain: layout style;
+  }
+
+  .popup .bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem;
+    padding: .2rem .4rem .18rem;
+    background: var(--pink);
+    color: #190513;
+    font-size: .56rem;
+    font-weight: 900;
+    letter-spacing: .08em;
+    white-space: nowrap;
+  }
+  .popup .bar i { font-style: normal; }
+  .popup .bar em {
+    font-style: normal;
+    display: inline-block;
+    width: .56em;
+    height: .56em;
+    background: #190513;
+    box-shadow: 0 0 0 2px #190513;
+  }
+
+  .popup .body {
+    padding: .42rem .55rem .5rem;
+    overflow: hidden;
+  }
+  .popup .text {
+    display: inline-block;
+    white-space: nowrap;
+    font-weight: 900;
+    letter-spacing: .02em;
+    color: #fff;
+    line-height: 1.35;
+    text-shadow:
+      2px 2px 0 var(--pink-dim),
+      0 0 12px rgba(255, 95, 162, .5);
+    animation: bob 1.2s ease-in-out infinite alternate;
+  }
+  .popup.accent .text { color: var(--pink-hi); }
+  .popup.accent { border-color: var(--pink-hi); }
+
+  @keyframes bob {
+    from { transform: translateY(0); }
+    to   { transform: translateY(-1px); }
+  }
+
+  @keyframes popLife {
+    0%   { opacity: 0; transform: translate(-50%, -50%) scale(.2); }
+    7%   { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
+    11%  { transform: translate(-50%, -50%) scale(.98); }
+    15%  { transform: translate(-50%, -50%) scale(1); }
+    78%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(.86); }
+  }
+
+  /* ---------- CRT 质感 ---------- */
+  .crt {
+    position: fixed;
+    inset: 0;
+    z-index: 9;
+    pointer-events: none;
+    background:
+      repeating-linear-gradient(
+        to bottom,
+        rgba(0, 0, 0, 0) 0 2px,
+        rgba(0, 0, 0, .28) 2px 4px
+      );
+    mix-blend-mode: multiply;
+    animation: flicker 4.5s steps(1) infinite;
+  }
+  @keyframes flicker {
+    0%, 96%, 100% { opacity: 1; }
+    97% { opacity: .86; }
+    98% { opacity: 1; }
+  }
+
+  .vignette {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 52%, rgba(0, 0, 0, .72) 100%);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .floor, .marquee-head span, .popup .text, .crt {
+      animation: none !important;
+    }
+    .press-start { animation-duration: 3s; }
+  }
+</style>
+</head>
+<body>
+  <canvas id="starfield" aria-hidden="true"></canvas>
+  <div class="floor" aria-hidden="true"></div>
+
+  <main class="hero">
+    <div class="marquee-head"><span>❤ 柏吉翠 ❤ 我爱你 ❤ 柏吉翠 ❤ 我爱你 ❤ 柏吉翠 ❤ 我爱你 ❤ 柏吉翠 ❤ 我爱你 ❤ 柏吉翠 ❤ 我爱你 ❤ 柏吉翠 ❤ 我爱你 ❤</span><span aria-hidden="true">❤ 柏吉翠 ❤ 我爱你 ❤ 柏吉翠 ❤ 我爱你 ❤ 柏吉翠 ❤ 我爱你 ❤ 柏吉翠 ❤ 我爱你 ❤ 柏吉翠 ❤ 我爱你 ❤ 柏吉翠 ❤ 我爱你 ❤</span></div>
+
+    <div class="hero-card">
+      <div class="bar">
+        <i>LOVE.EXE</i>
+        <i>[ <b></b><b></b> ]</i>
+      </div>
+      <div class="hero-inner">
+        <h1 class="love-line"><span class="name">柏吉翠</span>，<br>我爱你<span class="caret"></span></h1>
+        <p class="sub-line">I LOVE YOU · FOREVER</p>
+      </div>
+    </div>
+
+    <p class="press-start">▶ PRESS START · 点一下，多爱你一点</p>
+    <p class="hero-foot">♥ 1 PLAYER · INSERT HEART TO CONTINUE ♥</p>
+  </main>
+
+  <div id="popups" aria-live="off"></div>
+
+  <div class="crt" aria-hidden="true"></div>
+  <div class="vignette" aria-hidden="true"></div>
+
+<script>
+(() => {
+  const layer = document.getElementById('popups');
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const TEXTS = [
+    '柏吉翠，我爱你',
+    '柏吉翠，我爱你',
+    '柏吉翠，我爱你',
+    '柏吉翠，我爱你',
+    '柏吉翠，我爱你 ♥',
+    '我爱你，柏吉翠',
+    '柏吉翠 ♥ 我爱你',
+    '❤ 柏吉翠 ❤',
+    'LOVE U, 柏吉翠'
+  ];
+  const TITLES = ['LOVE.EXE', 'HEART.BAT', 'MISS_YOU', 'BJC♥.SYS', 'TRUE_LUV'];
+  const MAX_ALIVE = 34;
+  const MAX_MOBILE = 26;
+
+  let alive = 0;
+  let cap = window.innerWidth < 520 ? MAX_MOBILE : MAX_ALIVE;
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  function spawn(force = false) {
+    if (!force && alive >= cap) return;
+
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const small = w < 520;
+    const theme = Math.random();
+    const accent = theme > 0.62;
+    const size = small
+      ? 12 + Math.random() * 10
+      : 14 + Math.random() * 16;
+    const text = TEXTS[(Math.random() * TEXTS.length) | 0];
+    const title = TITLES[(Math.random() * TITLES.length) | 0];
+
+    const pop = el('div', 'popup' + (accent ? ' accent' : ''));
+
+    const bar = el('div', 'bar');
+    bar.append(el('i', null, title), el('em'));
+
+    const body = el('div', 'body');
+    const t = el('span', 'text', text);
+    t.style.fontSize = size.toFixed(1) + 'px';
+    body.appendChild(t);
+
+    pop.append(bar, body);
+
+    // 先插入量尺寸，再定位，保证弹窗完整落在屏幕内
+    pop.style.visibility = 'hidden';
+    layer.appendChild(pop);
+    const pw = pop.offsetWidth;
+    const ph = pop.offsetHeight;
+
+    const padX = Math.max(8, pw / 2 + 6);
+    const padY = Math.max(8, ph / 2 + 6);
+    const x = padX + Math.random() * Math.max(1, w - padX * 2);
+    const y = padY + Math.random() * Math.max(1, h - padY * 2);
+
+    const life = 3200 + Math.random() * 2200;
+    pop.style.left = x + 'px';
+    pop.style.top = y + 'px';
+    pop.style.setProperty('--life', life.toFixed(0) + 'ms');
+    pop.style.visibility = '';
+
+    alive++;
+    const kill = () => {
+      if (pop.isConnected) {
+        pop.remove();
+        alive--;
+      }
+    };
+    setTimeout(kill, life + 60);
+    pop.addEventListener('animationend', kill, { once: true });
+  }
+
+  // 持续循环弹出；前期节奏快，之后随机起伏
+  function loop() {
+    spawn();
+    const gap = reduce ? 900 : 130 + Math.random() * 260;
+    setTimeout(loop, gap);
+  }
+  loop();
+
+  // 点一下 / 戳一下：来一波爆发
+  function burst(count) {
+    for (let i = 0; i < count; i++) {
+      setTimeout(() => spawn(true), i * 70);
+    }
+  }
+  window.addEventListener('pointerdown', () => burst(window.innerWidth < 520 ? 4 : 6));
+
+  // ---------- 像素爱心粒子 ----------
+  const canvas = document.getElementById('starfield');
+  const ctx = canvas.getContext('2d');
+  const HEART = [
+    '.XX.XX.',
+    'XXXXXXX',
+    'XXXXXXX',
+    '.XXXXX.',
+    '..XXX..',
+    '...X...'
+  ];
+  const bits = Array.from(HEART.join(''), c => c === 'X');
+  const shape = [];
+  for (let r = 0; r < 6; r++) {
+    shape.push(bits.slice(r * 7, r * 7 + 7));
+  }
+
+  const PX = 2; // 单个像素点边长（CSS px）
+  let W = 0, H = 0, particles = [];
+
+  function newParticle(anywhere) {
+    const scale = Math.random() < .18 ? 2 : 1;
+    return {
+      x: Math.random() * W,
+      y: anywhere ? Math.random() * H : -30,
+      vy: 8 + Math.random() * 22,
+      drift: (Math.random() - .5) * 14,
+      phase: Math.random() * Math.PI * 2,
+      scale,
+      alpha: .18 + Math.random() * .5,
+      hue: Math.random() < .2 ? 190 : 335 + Math.random() * 18
+    };
+  }
+
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = Math.floor(W * dpr);
+    canvas.height = Math.floor(H * dpr);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const count = Math.round(Math.min(46, Math.max(18, (W * H) / 26000)));
+    particles = Array.from({ length: count }, () => newParticle(true));
+  }
+
+  function drawParticle(p) {
+    const s = PX * p.scale;
+    const gap = s > 2 ? 0.5 : 0;
+    ctx.globalAlpha = p.alpha;
+    ctx.fillStyle = 'hsl(' + p.hue + ' 100% 68%)';
+    for (let r = 0; r < 6; r++) {
+      for (let c = 0; c < 7; c++) {
+        if (!shape[r][c]) continue;
+        ctx.fillRect(
+          Math.round((p.x + c * s) / s) * s,
+          Math.round((p.y + r * s) / s) * s,
+          s - gap,
+          s - gap
+        );
+      }
+    }
+  }
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(48, now - last) / 1000;
+    last = now;
+    ctx.clearRect(0, 0, W, H);
+
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      p.y += p.vy * dt * (reduce ? .3 : 1);
+      p.phase += dt;
+      p.x += Math.sin(p.phase) * p.drift * dt;
+      if (p.y > H + 30) {
+        particles[i] = newParticle(false);
+      } else {
+        drawParticle(p);
+      }
+    }
+    ctx.globalAlpha = 1;
+    requestAnimationFrame(frame);
+  }
+
+  window.addEventListener('resize', () => {
+    cap = window.innerWidth < 520 ? MAX_MOBILE : MAX_ALIVE;
+    resize();
+  });
+
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
