@@ -4,22 +4,26 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <title>柏吉翠 · 跳一跳</title>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
 <style>
   html,body{margin:0;height:100%;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;
-    background:linear-gradient(#0a0418 0%,#2a0845 60%,#ff3cac 130%);font-family:"Courier New",monospace;color:#fff}
-  canvas{position:fixed;inset:0;width:100vw!important;height:100vh!important;image-rendering:pixelated;image-rendering:crisp-edges}
-  .ui{position:fixed;left:0;right:0;text-align:center;pointer-events:none;font-weight:bold}
-  #score{top:6vh;font-size:48px;color:#fffb96;text-shadow:0 0 8px #fffb96,0 0 18px #ff3cac}
-  #best{top:calc(6vh + 56px);font-size:13px;color:#2bd2ff;text-shadow:0 0 6px #2bd2ff}
-  #msg{top:22vh;font-size:20px;color:#ff3cac;text-shadow:0 0 6px #ff3cac,0 0 14px #ff3cac;transition:opacity .4s,transform .4s}
+    background:linear-gradient(180deg,#ffd9e6 0%,#ffeef3 45%,#fff7ef 100%);font-family:"Zen Maru Gothic","PingFang SC","Microsoft YaHei",sans-serif;color:#d94f7c}
+  canvas{position:fixed;inset:0;width:100vw;height:100vh}
+  .ui{position:fixed;left:0;right:0;text-align:center;pointer-events:none;font-weight:900}
+  #score{top:7vh;font-size:56px;color:#fff;text-shadow:0 2px 0 #f29bb6,0 4px 14px rgba(232,94,140,.45)}
+  #best{top:calc(7vh + 66px);font-size:14px;color:#e07a9c;letter-spacing:2px;font-weight:700}
+  #msg{top:24vh;font-size:22px;color:#e85e8c;text-shadow:0 0 10px #fff,0 0 4px #fff;transition:opacity .4s,transform .4s;opacity:0}
   #panel{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
-    background:rgba(10,4,24,.6);pointer-events:none;text-align:center}
-  #panel h1{margin:0;font-size:56px;color:#ff3cac;text-shadow:0 0 10px #ff3cac,0 0 30px #ff3cac;letter-spacing:6px}
-  #panel h2{margin:6px 0 30px;font-size:20px;color:#2bd2ff;text-shadow:0 0 8px #2bd2ff;letter-spacing:8px}
-  #panel p{margin:6px;color:#fffb96;text-shadow:0 0 6px #fffb96}
-  .blink{animation:b 1s steps(2) infinite}@keyframes b{50%{opacity:0}}
-  .heart{font-size:56px;color:#ff3cac;text-shadow:0 0 16px #ff3cac;animation:beat .8s infinite}
-  @keyframes beat{50%{transform:scale(1.2)}}
+    background:rgba(255,240,245,.55);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);text-align:center}
+  .card{background:rgba(255,255,255,.85);border-radius:28px;padding:34px 40px;box-shadow:0 12px 40px rgba(232,94,140,.25);border:2px solid #ffd0de}
+  #panel h1{margin:0;font-size:52px;color:#e85e8c;letter-spacing:8px;font-weight:900}
+  #panel h2{margin:6px 0 4px;font-size:16px;color:#c48aa0;letter-spacing:10px;font-weight:500}
+  #panel .jp{font-size:13px;color:#e8a0b8;letter-spacing:4px;margin-bottom:24px}
+  #panel p{margin:8px;color:#d94f7c;font-weight:700}
+  .btn{display:inline-block;margin-top:16px;padding:10px 34px;border-radius:30px;background:linear-gradient(#ff9ec0,#e85e8c);color:#fff;
+    font-weight:700;box-shadow:0 6px 16px rgba(232,94,140,.4);animation:beat 1.4s ease-in-out infinite}
+  .heart{font-size:44px;color:#ff7aa8;animation:beat 1.2s ease-in-out infinite}
+  @keyframes beat{50%{transform:scale(1.08)}}
 </style>
 </head>
 <body>
@@ -29,164 +33,202 @@
 <div id="panel"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
-// ---------- 音效 ----------
-let AC,chargeOsc;
+// ---------- 参数 ----------
+const CHARGE_TIME=0.9;   // 蓄满所需秒数（越小蓄力越快）
+const MAX_DIST=9;        // 蓄满时跳跃距离
+const JUMP_TIME=0.38;    // 空中时间
+// ---------- 音效（柔和音色） ----------
+let AC,chargeOsc,chargeGain;
 function ac(){if(!AC)AC=new (window.AudioContext||window.webkitAudioContext)();if(AC.state==='suspended')AC.resume();return AC;}
-function tone(f,d,type='square',v=.08,f2,delay=0){const a=ac(),o=a.createOscillator(),gn=a.createGain(),t=a.currentTime+delay;
+function tone(f,d,type='sine',v=.12,f2,delay=0){const a=ac(),o=a.createOscillator(),gn=a.createGain(),t=a.currentTime+delay;
   o.type=type;o.frequency.setValueAtTime(f,t);if(f2)o.frequency.exponentialRampToValueAtTime(f2,t+d);
-  gn.gain.setValueAtTime(v,t);gn.gain.exponentialRampToValueAtTime(.001,t+d);o.connect(gn).connect(a.destination);o.start(t);o.stop(t+d);}
+  gn.gain.setValueAtTime(0,t);gn.gain.linearRampToValueAtTime(v,t+.01);gn.gain.exponentialRampToValueAtTime(.001,t+d);
+  o.connect(gn).connect(a.destination);o.start(t);o.stop(t+d);}
 const SFX={
-  start(){[523,659,784,1047].forEach((f,i)=>tone(f,.12,'square',.07,0,i*.08));},
-  chargeOn(){const a=ac();chargeOsc=a.createOscillator();const gn=a.createGain();chargeOsc.type='triangle';
-    chargeOsc.frequency.setValueAtTime(200,a.currentTime);chargeOsc.frequency.linearRampToValueAtTime(900,a.currentTime+1.5);
-    gn.gain.value=.05;chargeOsc.connect(gn).connect(a.destination);chargeOsc.start();},
-  chargeOff(){if(chargeOsc){chargeOsc.stop();chargeOsc=null;}},
-  jump(){tone(300,.15,'square',.07,800);},
-  land(){tone(180,.08,'triangle',.12,90);},
-  perfect(c){const b=[659,784,988,1175,1319][Math.min(c-1,4)];tone(b,.1,'square',.07);tone(b*1.5,.15,'square',.06,0,.08);},
-  heart(){[880,1109,1319,1760].forEach((f,i)=>tone(f,.1,'triangle',.08,0,i*.05));},
-  over(){[392,330,262,196].forEach((f,i)=>tone(f,.2,'sawtooth',.06,0,i*.15));}
+  start(){[784,988,1175,1568].forEach((f,i)=>tone(f,.35,'sine',.1,0,i*.09));},
+  chargeOn(){const a=ac();chargeOsc=a.createOscillator();chargeGain=a.createGain();chargeOsc.type='sine';
+    chargeOsc.frequency.setValueAtTime(260,a.currentTime);chargeOsc.frequency.linearRampToValueAtTime(880,a.currentTime+CHARGE_TIME);
+    chargeGain.gain.value=.05;chargeOsc.connect(chargeGain).connect(a.destination);chargeOsc.start();},
+  chargeOff(){if(chargeOsc){chargeGain.gain.setTargetAtTime(0,AC.currentTime,.02);chargeOsc.stop(AC.currentTime+.1);chargeOsc=null;}},
+  jump(){tone(500,.18,'triangle',.08,1000);},
+  land(){tone(220,.12,'sine',.18,140);},
+  perfect(c){const b=[1047,1175,1319,1568,1760][Math.min(c-1,4)];tone(b,.4,'sine',.1);tone(b*1.5,.5,'sine',.07,0,.1);},
+  heart(){[1319,1568,1976,2637].forEach((f,i)=>tone(f,.4,'sine',.08,0,i*.07));},
+  over(){[659,587,523,392].forEach((f,i)=>tone(f,.5,'triangle',.08,0,i*.18));}
 };
 
 // ---------- 场景 ----------
-const PIXEL=0.35; // 像素化程度：越小越像素
-const NEON=[0xff3cac,0x2bd2ff,0xb967ff,0xfffb96,0x05ffa1];
-const LOVE=['柏吉翠 我喜欢你','每一跳都奔向你','你是我的霓虹','心跳 +1','翠翠最可爱','和你一起跳到永远','满世界都是你','Perfect Love ♥'];
-const renderer=new THREE.WebGLRenderer({antialias:false,alpha:true});
-renderer.setPixelRatio(PIXEL);document.body.prepend(renderer.domElement);
+const PALETTE=[ // [主体, 顶面]
+  [0xffb7c9,0xfff3f6],[0xc8e6c9,0xfdfbf2],[0xd7c4f0,0xfbf7ff],[0xffe0a8,0xfffaf0],[0xb5dcf5,0xf5fbff],[0xf8a5a5,0xfff0e8]];
+const LOVE=['柏吉翠 我喜欢你','每一跳都奔向你','好きだよ ♡','心跳 +1','翠翠最可爱','和你一起跳到永远','月が綺麗ですね','满世界都是你','ずっと一緒にいようね'];
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2.5));
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.outputEncoding=THREE.sRGBEncoding;
+document.body.prepend(renderer.domElement);
 const scene=new THREE.Scene();
 const cam=new THREE.OrthographicCamera(-1,1,1,-1,0.1,200);
-const CAM_OFF=new THREE.Vector3(-14,18,14);
-function resize(){const w=innerWidth,h=innerHeight,s=8.5,a=w/h;
-  renderer.setSize(w,h,false);
+const CAM_OFF=new THREE.Vector3(-14,17,14);
+function resize(){const w=innerWidth,h=innerHeight,a=w/h,s=a<1?5.2:6.5;
+  renderer.setSize(w,h);
   if(a<1){cam.left=-s;cam.right=s;cam.top=s/a;cam.bottom=-s/a;}else{cam.left=-s*a;cam.right=s*a;cam.top=s;cam.bottom=-s;}
   cam.updateProjectionMatrix();}
 addEventListener('resize',resize);resize();
-scene.add(new THREE.AmbientLight(0x8866ff,.7));
-const sun=new THREE.DirectionalLight(0xffc0f0,.9);sun.position.set(-5,12,8);scene.add(sun);
-const grid=new THREE.GridHelper(120,60,0xff3cac,0x6a2bb0);grid.material.transparent=true;grid.material.opacity=.5;scene.add(grid);
 
-function pixelTex(rows,color){const c=document.createElement('canvas');c.width=rows[0].length;c.height=rows.length;const x=c.getContext('2d');
-  x.fillStyle=color;rows.forEach((r,j)=>[...r].forEach((ch,i)=>ch==='#'&&x.fillRect(i,j,1,1)));
-  const t=new THREE.CanvasTexture(c);t.magFilter=t.minFilter=THREE.NearestFilter;return t;}
-const heartTex=pixelTex(['.##.##.','#######','#######','.#####.','..###..','...#...'],'#ff3cac');
+scene.add(new THREE.HemisphereLight(0xfff0f5,0xffc8d8,.75));
+const sun=new THREE.DirectionalLight(0xfff4e6,.75);sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-14,right:14,top:14,bottom:-14,near:1,far:60});
+sun.shadow.radius=4;sun.shadow.bias=-.0005;scene.add(sun,sun.target);
+const SUN_OFF=new THREE.Vector3(-6,18,10);
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(400,400),new THREE.MeshStandardMaterial({color:0xfde4ec,roughness:1}));
+ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;scene.add(ground);
 
-// 玩家：像素风棋子
+// 爱心几何
+function heartShape(){const s=new THREE.Shape();s.moveTo(0,-.5);
+  s.bezierCurveTo(-.1,-.35,-.6,-.1,-.6,.2);s.bezierCurveTo(-.6,.5,-.25,.6,0,.35);
+  s.bezierCurveTo(.25,.6,.6,.5,.6,.2);s.bezierCurveTo(.6,-.1,.1,-.35,0,-.5);return s;}
+const heartGeo=new THREE.ExtrudeGeometry(heartShape(),{depth:.18,bevelEnabled:true,bevelSize:.06,bevelThickness:.06,bevelSegments:4,curveSegments:16});
+heartGeo.center();
+const heartMat=new THREE.MeshStandardMaterial({color:0xff5c8d,roughness:.3,metalness:.1,emissive:0x5a0f24});
+
+// 樱花花瓣
+const petalShape=new THREE.Shape();petalShape.moveTo(0,0);petalShape.quadraticCurveTo(.12,.1,.05,.22);
+petalShape.lineTo(0,.18);petalShape.lineTo(-.05,.22);petalShape.quadraticCurveTo(-.12,.1,0,0);
+const petalGeo=new THREE.ShapeGeometry(petalShape);
+const petalMat=new THREE.MeshBasicMaterial({color:0xffc0d3,side:THREE.DoubleSide,transparent:true,opacity:.9});
+const petals=[];for(let i=0;i<70;i++){const m=new THREE.Mesh(petalGeo,petalMat);scene.add(m);
+  petals.push({m,v:new THREE.Vector3(.3+Math.random()*.5,-(.6+Math.random()*.6),-(.2+Math.random()*.4)),r:new THREE.Vector3(Math.random()*3,Math.random()*3,Math.random()*3)});}
+function spawnPetal(p,c,init){p.m.position.set(c.x+(Math.random()-.5)*26,init?Math.random()*14:12+Math.random()*4,c.z+(Math.random()-.5)*26);}
+
+// 玩家：精致棋子
 const player=new THREE.Group();
-const pink=new THREE.MeshLambertMaterial({color:0xff7ac8,emissive:0x501030});
-const body=new THREE.Mesh(new THREE.CylinderGeometry(.25,.4,1.1,8),pink);body.position.y=.55;
-const head=new THREE.Mesh(new THREE.SphereGeometry(.3,8,6),new THREE.MeshLambertMaterial({color:0xffd6e8,emissive:0x402030}));head.position.y=1.4;
-const bow=new THREE.Mesh(new THREE.BoxGeometry(.4,.15,.15),new THREE.MeshBasicMaterial({color:0x2bd2ff}));bow.position.set(0,1.72,0);
-player.add(body,head,bow);scene.add(player);
-const inner=player; // 方便旋转
+const body=new THREE.Mesh(new THREE.LatheGeometry([[0,0],[.42,0],[.42,.08],[.3,.2],[.22,.6],[.2,.85],[.28,.95],[0,1.0]].map(p=>new THREE.Vector2(p[0],p[1])),32),
+  new THREE.MeshStandardMaterial({color:0xff8fb1,roughness:.35,metalness:.05}));
+const head=new THREE.Mesh(new THREE.SphereGeometry(.3,32,24),new THREE.MeshStandardMaterial({color:0xfff1f4,roughness:.4}));head.position.y=1.28;
+const bowMat=new THREE.MeshStandardMaterial({color:0xe8436f,roughness:.4});
+const bowL=new THREE.Mesh(new THREE.ConeGeometry(.12,.22,16),bowMat);bowL.rotation.z=Math.PI/2;bowL.position.set(-.12,1.55,0);
+const bowR=bowL.clone();bowR.rotation.z=-Math.PI/2;bowR.position.x=.12;
+const knot=new THREE.Mesh(new THREE.SphereGeometry(.06,16,12),bowMat);knot.position.y=1.55;
+player.add(body,head,bowL,bowR,knot);player.traverse(o=>{if(o.isMesh)o.castShadow=true});scene.add(player);
 
 // ---------- 游戏状态 ----------
-let plats=[],parts=[],S;
+let plats=[],parts=[],ripples=[],S;
 const $=id=>document.getElementById(id);
 function mkPlat(pos,size,shape){
-  const color=NEON[Math.random()*NEON.length|0];
-  const geo=shape==='box'?new THREE.BoxGeometry(size,1,size):new THREE.CylinderGeometry(size/2,size/2,1,12);
-  geo.translate(0,.5,0);
+  const [c1,c2]=PALETTE[Math.random()*PALETTE.length|0];
   const g=new THREE.Group();
-  const m=new THREE.Mesh(geo,new THREE.MeshLambertMaterial({color:0x1a0533,emissive:color,emissiveIntensity:.25}));
-  const e=new THREE.LineSegments(new THREE.EdgesGeometry(geo),new THREE.LineBasicMaterial({color}));
-  g.add(m,e);g.position.copy(pos);scene.add(g);
-  const p={g,size,shape,color,heart:null};
-  if(plats.length>1&&Math.random()<.35){p.heart=new THREE.Sprite(new THREE.SpriteMaterial({map:heartTex}));p.heart.scale.set(.8,.7,1);
-    p.heart.position.set(pos.x,1.9,pos.z);scene.add(p.heart);}
+  const H=1,top=.18;
+  const geo=shape==='box'?new THREE.BoxGeometry(size,H-top,size):new THREE.CylinderGeometry(size/2,size/2,H-top,48);
+  geo.translate(0,(H-top)/2,0);
+  const m1=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:c1,roughness:.55}));
+  const tg=shape==='box'?new THREE.BoxGeometry(size+.04,top,size+.04):new THREE.CylinderGeometry(size/2+.02,size/2+.02,top,48);
+  tg.translate(0,H-top/2,0);
+  const m2=new THREE.Mesh(tg,new THREE.MeshStandardMaterial({color:c2,roughness:.4}));
+  // 装饰缎带
+  const rg=shape==='box'?new THREE.BoxGeometry(size+.02,.1,size+.02):new THREE.CylinderGeometry(size/2+.01,size/2+.01,.1,48);
+  rg.translate(0,.25,0);
+  const m3=new THREE.Mesh(rg,new THREE.MeshStandardMaterial({color:0xffffff,roughness:.3,transparent:true,opacity:.75}));
+  [m1,m2,m3].forEach(m=>{m.castShadow=true;m.receiveShadow=true;g.add(m)});
+  g.position.copy(pos);scene.add(g);
+  const p={g,size,shape,color:c1,heart:null};
+  if(plats.length>1&&Math.random()<.35){p.heart=new THREE.Mesh(heartGeo,heartMat);p.heart.scale.setScalar(.55);p.heart.castShadow=true;
+    p.heart.position.set(pos.x,1.8,pos.z);scene.add(p.heart);}
   plats.push(p);return p;
 }
 function addNext(){const c=plats[plats.length-1];
   const dir=Math.random()<.5?new THREE.Vector3(1,0,0):new THREE.Vector3(0,0,-1);
-  const size=1.4+Math.random()*1.6;
+  const size=1.4+Math.random()*1.4;
   const dist=c.size/2+size/2+1+Math.random()*2.6;
   mkPlat(c.g.position.clone().addScaledVector(dir,dist),size,Math.random()<.5?'box':'cyl');
   while(plats.length>8){const o=plats.shift();scene.remove(o.g);if(o.heart)scene.remove(o.heart);}
 }
-function reset(){
-  plats.forEach(p=>{scene.remove(p.g);if(p.heart)scene.remove(p.heart)});plats=[];
-  mkPlat(new THREE.Vector3(0,0,0),2.4,'box');addNext();
-  player.position.set(0,1,0);player.rotation.set(0,0,0);player.scale.set(1,1,1);
-  S=Object.assign(S||{},{state:S?S.state:'title',score:0,charge:0,charging:false,jump:null,fall:null,combo:0});
-  S.best=+(localStorage.bjcBest||0);updHUD();
-  camTarget.copy(focusPoint());cam.position.copy(camTarget).add(CAM_OFF);cam.lookAt(camTarget);
-}
 const camTarget=new THREE.Vector3();
 function focusPoint(){const a=plats[plats.length-2].g.position,b=plats[plats.length-1].g.position;return a.clone().add(b).multiplyScalar(.5);}
+function reset(){
+  plats.forEach(p=>{scene.remove(p.g);if(p.heart)scene.remove(p.heart)});plats=[];
+  mkPlat(new THREE.Vector3(0,0,0),2.4,'cyl');addNext();
+  player.position.set(0,1,0);player.rotation.set(0,0,0);player.scale.set(1,1,1);
+  S=Object.assign(S||{state:'title'},{score:0,charge:0,charging:false,jump:null,fall:null,combo:0});
+  S.best=+(localStorage.bjcBest||0);updHUD();
+  camTarget.copy(focusPoint());
+  petals.forEach(p=>spawnPetal(p,camTarget,true));
+}
 function updHUD(){$('score').textContent=S.score;$('best').textContent='BEST '+S.best;}
-function showPanel(html){$('panel').innerHTML=html;$('panel').style.display=html?'flex':'none';}
+function showPanel(html){$('panel').innerHTML=html?`<div class="card">${html}</div>`:'';$('panel').style.display=html?'flex':'none';}
 let msgTimer;function say(t){const m=$('msg');m.textContent=t;m.style.opacity=1;m.style.transform='translateY(0)';
-  clearTimeout(msgTimer);msgTimer=setTimeout(()=>{m.style.opacity=0;m.style.transform='translateY(-20px)'},1400);}
-function burst(pos,color,n=18){for(let i=0;i<n;i++){const m=new THREE.Mesh(new THREE.BoxGeometry(.12,.12,.12),new THREE.MeshBasicMaterial({color}));
-  m.position.copy(pos);scene.add(m);parts.push({m,v:new THREE.Vector3((Math.random()-.5)*6,Math.random()*6+2,(Math.random()-.5)*6),l:1});}}
+  clearTimeout(msgTimer);msgTimer=setTimeout(()=>{m.style.opacity=0;m.style.transform='translateY(-20px)'},1500);}
+const sparkGeo=new THREE.SphereGeometry(.07,8,6);
+function burst(pos,color,n=16,hearts){for(let i=0;i<n;i++){
+  const m=hearts?new THREE.Mesh(heartGeo,heartMat):new THREE.Mesh(sparkGeo,new THREE.MeshBasicMaterial({color,transparent:true}));
+  if(hearts)m.scale.setScalar(.18);m.position.copy(pos);scene.add(m);
+  parts.push({m,v:new THREE.Vector3((Math.random()-.5)*5,Math.random()*5+2,(Math.random()-.5)*5),l:1});}}
 function onPlat(p,pos){const dx=pos.x-p.g.position.x,dz=pos.z-p.g.position.z,r=p.size/2;
   return p.shape==='box'?Math.abs(dx)<=r&&Math.abs(dz)<=r:dx*dx+dz*dz<=r*r;}
 
 // ---------- 输入 ----------
 function down(e){e.preventDefault();
-  if(S.state==='title'||S.state==='over'){if(S.state==='over'){S.state='play';reset();}S.state='play';showPanel('');SFX.start();return;}
-  if(S.state==='play'&&!S.jump&&!S.fall){S.charging=true;S.charge=0;SFX.chargeOn();}}
+  if(S.state!=='play'){if(S.state==='over')reset();S.state='play';showPanel('');SFX.start();return;}
+  if(!S.jump&&!S.fall){S.charging=true;S.charge=0;SFX.chargeOn();}}
 function up(e){if(!S.charging)return;e.preventDefault();S.charging=false;SFX.chargeOff();SFX.jump();
   const cur=plats[plats.length-2],nxt=plats[plats.length-1];
   const dir=nxt.g.position.clone().sub(player.position);dir.y=0;dir.normalize();
-  const dist=S.charge*7.5;
-  S.jump={t:0,from:player.position.clone(),to:player.position.clone().addScaledVector(dir,dist),
-    axis:new THREE.Vector3(0,1,0).cross(dir).normalize(),y0:1};
+  S.jump={t:0,from:player.position.clone().setY(1),to:player.position.clone().setY(1).addScaledVector(dir,S.charge*MAX_DIST),
+    axis:new THREE.Vector3(0,1,0).cross(dir).normalize()};
   cur.g.scale.y=1;player.scale.set(1,1,1);}
 renderer.domElement.addEventListener('pointerdown',down);$('panel').addEventListener('pointerdown',down);
-addEventListener('pointerup',up);
+addEventListener('pointerup',up);addEventListener('pointercancel',up);
 addEventListener('keydown',e=>{if(e.code==='Space'&&!e.repeat)down(e)});
 addEventListener('keyup',e=>{if(e.code==='Space')up(e)});
 
-// ---------- 落地判定 ----------
+// ---------- 落地 ----------
 function land(){const cur=plats[plats.length-2],nxt=plats[plats.length-1],pos=player.position;
   player.quaternion.identity();
   if(onPlat(nxt,pos)){
     SFX.land();
-    const d=Math.hypot(pos.x-nxt.g.position.x,pos.z-nxt.g.position.z);
-    const perfect=d<.3;
+    const perfect=Math.hypot(pos.x-nxt.g.position.x,pos.z-nxt.g.position.z)<.3;
     S.combo=perfect?S.combo+1:0;S.score+=perfect?2*S.combo:1;
-    if(perfect){SFX.perfect(S.combo);say('PERFECT! '+LOVE[Math.random()*LOVE.length|0]);ripple(nxt);}
+    if(perfect){SFX.perfect(S.combo);say('PERFECT ♡ '+LOVE[Math.random()*LOVE.length|0]);ripple(nxt);}
     else if(S.score%5===0)say(LOVE[Math.random()*LOVE.length|0]);
-    if(nxt.heart){scene.remove(nxt.heart);nxt.heart=null;S.score+=3;SFX.heart();say('+3 ♥ 柏吉翠的心');
-      burst(new THREE.Vector3(pos.x,2,pos.z),0xff3cac,30);}
-    burst(new THREE.Vector3(pos.x,1.05,pos.z),nxt.color,10);
+    if(nxt.heart){scene.remove(nxt.heart);nxt.heart=null;S.score+=3;SFX.heart();say('+3 ♡ 柏吉翠的心');
+      burst(new THREE.Vector3(pos.x,2,pos.z),0,14,true);}
+    burst(new THREE.Vector3(pos.x,1.05,pos.z),0xffffff,10);
     updHUD();addNext();
   }else if(onPlat(cur,pos)){SFX.land();}
-  else{ // 掉落：判断是否擦边，擦边则向外倾倒
-    S.fall={t:0};SFX.over();
-  }
+  else{S.fall={t:0};SFX.over();}
 }
-const ripples=[];
-function ripple(p){const m=new THREE.Mesh(new THREE.RingGeometry(.3,.45,16),new THREE.MeshBasicMaterial({color:0xfffb96,transparent:true,side:THREE.DoubleSide}));
+function ripple(p){const m=new THREE.Mesh(new THREE.RingGeometry(.3,.38,48),new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,side:THREE.DoubleSide}));
   m.rotation.x=-Math.PI/2;m.position.set(p.g.position.x,1.02,p.g.position.z);scene.add(m);ripples.push({m,t:0});}
-
 function gameOver(){S.state='over';S.best=Math.max(S.best,S.score);localStorage.bjcBest=S.best;updHUD();
-  showPanel(`<div class="heart">♥</div><h1 style="font-size:40px">GAME OVER</h1><p style="font-size:22px">得分 ${S.score}</p>
-  <p style="color:#2bd2ff">${S.score>=S.best&&S.score>0?'新纪录！柏吉翠最棒 ♥':'柏吉翠，再来一次嘛 ♥'}</p><p class="blink" style="margin-top:24px">点击重新开始</p>`);}
+  showPanel(`<div class="heart">♡</div><h1 style="font-size:36px">おしまい</h1><p style="font-size:24px">得分 ${S.score}</p>
+  <p style="color:#c48aa0">${S.score>=S.best&&S.score>0?'新纪录！柏吉翠最棒 ♡':'柏吉翠，再来一次嘛 ♡'}</p><div class="btn">再来一次</div>`);}
 
 // ---------- 主循环 ----------
 let last=performance.now();
 function loop(now){const dt=Math.min((now-last)/1000,.05);last=now;
   const cur=plats[plats.length-2];
-  if(S.charging){S.charge=Math.min(S.charge+dt/1.5,1);
-    const k=1-S.charge*.35;cur.g.scale.y=k;player.position.y=k;player.scale.set(1+S.charge*.2,1-S.charge*.4,1+S.charge*.2);}
-  if(S.jump){const j=S.jump;j.t=Math.min(j.t+dt/.38,1);
-    player.position.lerpVectors(j.from,j.to,j.t);player.position.y=1+Math.sin(Math.PI*j.t)*2.6;
+  if(S.charging){S.charge=Math.min(S.charge+dt/CHARGE_TIME,1);
+    const k=1-S.charge*.35;cur.g.scale.y=k;player.position.y=k;player.scale.set(1+S.charge*.15,1-S.charge*.35,1+S.charge*.15);}
+  if(S.jump){const j=S.jump;j.t=Math.min(j.t+dt/JUMP_TIME,1);
+    player.position.lerpVectors(j.from,j.to,j.t);player.position.y=1+Math.sin(Math.PI*j.t)*2.4;
     player.quaternion.setFromAxisAngle(j.axis,Math.PI*2*j.t);
     if(j.t>=1){S.jump=null;player.position.y=1;land();}}
   if(S.fall){S.fall.t+=dt;player.position.y=Math.max(0,1-S.fall.t*4);player.rotation.z=Math.min(S.fall.t*4,Math.PI/2);
     if(S.fall.t>.6){S.fall=null;gameOver();}}
-  plats.forEach(p=>{if(p.heart)p.heart.position.y=1.9+Math.sin(now/250)*.15;});
-  for(let i=parts.length-1;i>=0;i--){const p=parts[i];p.l-=dt*1.5;p.v.y-=15*dt;p.m.position.addScaledVector(p.v,dt);
+  plats.forEach(p=>{if(p.heart){p.heart.position.y=1.8+Math.sin(now/300)*.12;p.heart.rotation.y=now/600;}});
+  for(let i=parts.length-1;i>=0;i--){const p=parts[i];p.l-=dt*1.4;p.v.y-=12*dt;p.m.position.addScaledVector(p.v,dt);
+    if(p.m.material.transparent&&p.m.material!==heartMat)p.m.material.opacity=p.l;
     if(p.l<=0){scene.remove(p.m);parts.splice(i,1);}}
   for(let i=ripples.length-1;i>=0;i--){const r=ripples[i];r.t+=dt;r.m.scale.setScalar(1+r.t*6);r.m.material.opacity=1-r.t*1.5;
     if(r.t>.66){scene.remove(r.m);ripples.splice(i,1);}}
   camTarget.lerp(focusPoint(),.15);cam.position.copy(camTarget).add(CAM_OFF);cam.lookAt(camTarget);
-  grid.position.set(Math.round(camTarget.x/2)*2,0,Math.round(camTarget.z/2)*2);
+  sun.position.copy(camTarget).add(SUN_OFF);sun.target.position.copy(camTarget);
+  ground.position.set(camTarget.x,0,camTarget.z);
+  for(const p of petals){p.m.position.addScaledVector(p.v,dt);p.m.rotation.x+=p.r.x*dt;p.m.rotation.y+=p.r.y*dt;
+    if(p.m.position.y<0||Math.abs(p.m.position.x-camTarget.x)>16||Math.abs(p.m.position.z-camTarget.z)>16)spawnPetal(p,camTarget);}
   renderer.render(scene,cam);requestAnimationFrame(loop);}
 reset();
-showPanel(`<div class="heart">♥</div><h1>柏吉翠</h1><h2>跳·一·跳</h2><p class="blink">点击 / 空格 开始</p><p style="color:#b967ff;font-size:13px">按住蓄力 松开跳跃</p>`);
+showPanel(`<div class="heart">♡</div><h1>柏吉翠</h1><h2>跳 一 跳</h2><div class="jp">〜 恋のジャンプ 〜</div>
+  <p style="font-size:13px;color:#c48aa0">按住蓄力 · 松开跳跃</p><div class="btn">开始</div>`);
 requestAnimationFrame(loop);
 </script>
 </body>
