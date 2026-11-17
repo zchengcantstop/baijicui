@@ -39,16 +39,10 @@
 <div id="touch"><div class="grp"><div class="k" data-k="l">◀</div><div class="k" data-k="r">▶</div></div><div class="grp"><div class="k" data-k="u">▲</div></div></div>
 <div id="panel"></div>
 </div>
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
 <script>
 // ---------- 常量 ----------
 const T=24,W=40,H=25,PW=16,PH=22,SPEED=170,GRAV=1800,JUMP=640,STEP=1/60;
-const ROOM_PREFIX='bjc-fireice-';
-// 国内可访问的 STUN（PeerJS 默认的 Google STUN 在国内不通，导致跨设备连不上）
-const PEER_OPTS={config:{iceServers:[
-  {urls:'stun:stun.miwifi.com:3478'},{urls:'stun:stun.chat.bilibili.com:3478'},{urls:'stun:stun.qq.com:3478'},
-  {urls:'stun:stun.cloudflare.com:3478'},{urls:'stun:stun.l.google.com:19302'},
-  {urls:'turn:eu-0.turn.peerjs.com:3478',username:'peerjs',credential:'peerjsp'}]}};
 const $=id=>document.getElementById(id);
 const cv=$('cv'),ctx=cv.getContext('2d');
 
@@ -141,32 +135,40 @@ const merge=(...a)=>({l:a.some(i=>i.l),r:a.some(i=>i.r),u:a.some(i=>i.u)});
 const myInput=()=>merge(wasd(),arrows(),touch,{u:keys.Space});
 let remoteInput={l:false,r:false,u:false};
 
-// ---------- 联网 (PeerJS / WebRTC) ----------
-let peer=null,conn=null,lastSent='';
-function cleanupNet(){try{conn&&conn.close()}catch(e){}try{peer&&peer.destroy()}catch(e){}peer=conn=null;}
-function bindConn(c){
-  conn=c;
-  c.on('data',d=>{
-    if(mode==='host'&&d.t==='i')remoteInput=d;
-    if(mode==='guest'&&d.t==='s'){if(!S||d.lv!==S.lv)loadLevel(d.lv);applyState(d);}
-  });
-  c.on('close',()=>{if(mode)showPanel('lost');});
-  c.on('error',()=>{if(mode)showPanel('lost');});
+// ---------- 联网（公共 MQTT 服务器中转，手机流量/不同 WiFi 都能连） ----------
+const BROKER='wss://broker.emqx.io:8084/mqtt';
+let client=null,conn=null,pending=null,lastSent='',lastRecv=0;
+function cleanupNet(){try{client&&client.end(true)}catch(e){}client=conn=pending=null;}
+function connect(code,role,onReady){
+  cleanupNet();
+  const base='bjc/fireice/'+code+'/',mine=base+(role==='host'?'h':'g'),theirs=base+(role==='host'?'g':'h');
+  const c=client=mqtt.connect(BROKER,{clean:true,connectTimeout:8000,reconnectPeriod:2000});
+  c.on('connect',()=>{c.subscribe(theirs);if(onReady){onReady();onReady=null;}});
+  c.on('message',(t,buf)=>{if(client!==c)return;let d;try{d=JSON.parse(buf)}catch(e){return}lastRecv=performance.now();onData(d);});
+  c.on('error',e=>{if(client===c&&!conn)showPanel('err','连不上服务器：'+e.message);});
+  const link={send:o=>{if(c.connected)c.publish(mine,JSON.stringify(o));},get open(){return c.connected;}};
+  pending={role,link};return link;
+}
+function onData(d){
+  if(d.t==='hi'&&pending&&pending.role==='host'){conn=pending.link;conn.send({t:'ok'});if(mode!=='host')startGame('host');}
+  else if(d.t==='ok'&&pending&&pending.role==='guest'&&!conn){conn=pending.link;startGame('guest');}
+  else if(mode==='host'&&d.t==='i')remoteInput=d;
+  else if(mode==='guest'&&d.t==='s'){if(!S||d.lv!==S.lv)loadLevel(d.lv);applyState(d);}
 }
 function createRoom(){
-  cleanupNet();const code=String(Math.floor(1000+Math.random()*9000));
-  showPanel('wait',code);
-  peer=new Peer(ROOM_PREFIX+code,PEER_OPTS);
-  peer.on('error',e=>{if(e.type==='unavailable-id')createRoom();else showPanel('err',e.type);});
-  peer.on('connection',c=>{if(conn){c.close();return;}c.on('open',()=>{bindConn(c);startGame('host');});});
+  const code=String(Math.floor(1000+Math.random()*9000));
+  showPanel('wait',code);connect(code,'host');
 }
 function joinRoom(code){
   code=(code||'').trim();if(!/^\d{4}$/.test(code)){alert('请输入 4 位房间号');return;}
-  cleanupNet();showPanel('joining',code);
-  peer=new Peer(PEER_OPTS);
-  const me=peer,timer=setTimeout(()=>{if(peer===me&&!conn)showPanel('err','连接超时：两台设备没能直连。<br>试试连同一个 WiFi，或换个网络再试');},15000);
-  peer.on('open',()=>{const c=peer.connect(ROOM_PREFIX+code,{reliable:false});c.on('open',()=>{clearTimeout(timer);bindConn(c);startGame('guest');});});
-  peer.on('error',e=>showPanel('err',e.type==='peer-unavailable'?'房间不存在或已关闭':e.type));
+  showPanel('joining',code);
+  const link=connect(code,'guest',()=>{
+    let n=0;link.send({t:'hi'});
+    const iv=setInterval(()=>{
+      if(conn||!pending||pending.link!==link){clearInterval(iv);return;}
+      if(++n>8){clearInterval(iv);cleanupNet();showPanel('err','房间不存在，或房主已经退出');return;}
+      link.send({t:'hi'});},1000);
+  });
 }
 function packState(){return{t:'s',lv:S.lv,st:S.status,tm:S.timer,time:S.time,open:S.open,got:S.got,
   ps:S.ps.map(p=>[Math.round(p.x*10)/10,Math.round(p.y*10)/10,p.face,p.ground?1:0,p.dead?1:0])};}
@@ -195,8 +197,9 @@ function loop(now){
       while(acc>=STEP){acc-=STEP;
         const ins=mode==='local'?[merge(wasd(),touch),arrows()]:[myInput(),remoteInput];
         update(ins);}
-      if(mode==='host'&&conn&&conn.open&&frame%2===0)conn.send(packState());
+      if(mode==='host'&&conn&&conn.open&&frame%3===0)conn.send(packState());
     }
+    if(mode!=='local'&&conn&&performance.now()-lastRecv>6000){cleanupNet();showPanel('lost');}
   }
   frame++;draw(now/1000);
 }
@@ -289,7 +292,7 @@ function showPanel(kind,arg){
   const ic=$('iCode');if(ic)ic.onkeydown=e=>{if(e.key==='Enter')joinRoom(ic.value);};
 }
 function startGame(m){
-  mode=m;remoteInput={l:false,r:false,u:false};loadLevel(0);acc=0;
+  mode=m;lastRecv=performance.now();remoteInput={l:false,r:false,u:false};loadLevel(0);acc=0;
   $('panel').classList.add('hide');$('touch').style.display=isTouch?'flex':'none';
   tone(784,.2,'sine',.06);
 }
