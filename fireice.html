@@ -44,6 +44,11 @@
 // ---------- 常量 ----------
 const T=24,W=40,H=25,PW=16,PH=22,SPEED=170,GRAV=1800,JUMP=640,STEP=1/60;
 const ROOM_PREFIX='bjc-fireice-';
+// 国内可访问的 STUN（PeerJS 默认的 Google STUN 在国内不通，导致跨设备连不上）
+const PEER_OPTS={config:{iceServers:[
+  {urls:'stun:stun.miwifi.com:3478'},{urls:'stun:stun.chat.bilibili.com:3478'},{urls:'stun:stun.qq.com:3478'},
+  {urls:'stun:stun.cloudflare.com:3478'},{urls:'stun:stun.l.google.com:19302'},
+  {urls:'turn:eu-0.turn.peerjs.com:3478',username:'peerjs',credential:'peerjsp'}]}};
 const $=id=>document.getElementById(id);
 const cv=$('cv'),ctx=cv.getContext('2d');
 
@@ -151,15 +156,16 @@ function bindConn(c){
 function createRoom(){
   cleanupNet();const code=String(Math.floor(1000+Math.random()*9000));
   showPanel('wait',code);
-  peer=new Peer(ROOM_PREFIX+code);
+  peer=new Peer(ROOM_PREFIX+code,PEER_OPTS);
   peer.on('error',e=>{if(e.type==='unavailable-id')createRoom();else showPanel('err',e.type);});
   peer.on('connection',c=>{if(conn){c.close();return;}c.on('open',()=>{bindConn(c);startGame('host');});});
 }
 function joinRoom(code){
   code=(code||'').trim();if(!/^\d{4}$/.test(code)){alert('请输入 4 位房间号');return;}
   cleanupNet();showPanel('joining',code);
-  peer=new Peer();
-  peer.on('open',()=>{const c=peer.connect(ROOM_PREFIX+code,{reliable:false});c.on('open',()=>{bindConn(c);startGame('guest');});});
+  peer=new Peer(PEER_OPTS);
+  const me=peer,timer=setTimeout(()=>{if(peer===me&&!conn)showPanel('err','连接超时：两台设备没能直连。<br>试试连同一个 WiFi，或换个网络再试');},15000);
+  peer.on('open',()=>{const c=peer.connect(ROOM_PREFIX+code,{reliable:false});c.on('open',()=>{clearTimeout(timer);bindConn(c);startGame('guest');});});
   peer.on('error',e=>showPanel('err',e.type==='peer-unavailable'?'房间不存在或已关闭':e.type));
 }
 function packState(){return{t:'s',lv:S.lv,st:S.status,tm:S.timer,time:S.time,open:S.open,got:S.got,
