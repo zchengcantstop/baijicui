@@ -28,17 +28,17 @@
   #touch div.k{pointer-events:auto;width:68px;height:68px;border-radius:50%;background:rgba(255,255,255,.16);border:2px solid rgba(255,255,255,.35);
     display:flex;align-items:center;justify-content:center;font-size:28px;color:#fff}
   #touch div.k.on{background:rgba(255,255,255,.4)}
-  #rotate{display:none;position:fixed;inset:0;z-index:30;background:#141d12;align-items:center;justify-content:center;text-align:center;font-size:18px;font-weight:700;line-height:2}
-  @media (orientation:portrait) and (pointer:coarse){#rotate{display:flex}}
+  #stage{position:fixed;left:0;top:0;width:100vw;height:100vh;transform-origin:0 0}
 </style>
 </head>
 <body>
+<div id="stage">
 <div id="wrap"><canvas id="cv" width="960" height="600"></canvas></div>
 <div id="hud"></div>
 <a id="home" href="index.html">‹ 主页</a>
 <div id="touch"><div class="grp"><div class="k" data-k="l">◀</div><div class="k" data-k="r">▶</div></div><div class="grp"><div class="k" data-k="u">▲</div></div></div>
 <div id="panel"></div>
-<div id="rotate"><div>📱↻<br>请把手机横过来玩</div></div>
+</div>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
 // ---------- 常量 ----------
@@ -248,9 +248,14 @@ function drawPlayer(p,i,t){
 }
 
 // ---------- 自适应缩放 ----------
-function fit(){const s=Math.min(innerWidth/cv.width,(innerHeight-28)/cv.height);cv.style.width=cv.width*s+'px';cv.style.height=cv.height*s+'px';}
-addEventListener('resize',fit);fit();
+// 手机竖屏（含锁定方向/微信内）时把整个舞台旋转 90°，强制横屏显示
 const isTouch=matchMedia('(pointer:coarse)').matches||'ontouchstart' in window;
+function fit(){
+  const port=isTouch&&innerHeight>innerWidth,vw=port?innerHeight:innerWidth,vh=port?innerWidth:innerHeight,st=$('stage');
+  st.style.width=vw+'px';st.style.height=vh+'px';st.style.transform=port?`translateX(${innerWidth}px) rotate(90deg)`:'';
+  const s=Math.min(vw/cv.width,(vh-28)/cv.height);cv.style.width=cv.width*s+'px';cv.style.height=cv.height*s+'px';
+}
+addEventListener('resize',fit);addEventListener('orientationchange',()=>setTimeout(fit,200));fit();
 
 // ---------- 面板 ----------
 function showPanel(kind,arg){
