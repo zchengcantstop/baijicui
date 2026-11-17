@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>柏吉翠 · 冰火人</title>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#141d12;color:#f3ead2;touch-action:none;user-select:none;-webkit-user-select:none;
+    -webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;font-family:"Zen Maru Gothic","PingFang SC","Microsoft YaHei",sans-serif}
+  #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+  canvas{display:block;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.5)}
+  #hud{position:fixed;top:8px;left:0;right:0;text-align:center;font-weight:900;font-size:15px;pointer-events:none;text-shadow:0 2px 4px #000;letter-spacing:1px}
+  #home{position:fixed;top:8px;left:10px;z-index:20;padding:5px 12px;border-radius:16px;background:rgba(0,0,0,.45);color:#f3ead2;text-decoration:none;font-size:13px;font-weight:700}
+  #panel{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;background:rgba(10,15,8,.7);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+  #panel.hide{display:none}
+  .card{width:min(360px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;box-sizing:border-box;background:#2a3622;border:2px solid #6b5b3a;border-radius:20px;padding:22px;text-align:center;box-shadow:0 12px 40px #000}
+  .card h1{margin:0 0 4px;font-size:34px;letter-spacing:4px;background:linear-gradient(90deg,#ff7a3c,#ffd23c 45%,#7ad8ff 55%,#3c8cff);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .card p{margin:8px 0;font-size:14px;line-height:1.6;color:#d8ccaa}
+  .btn{display:block;width:100%;margin:10px 0 0;padding:11px;border:0;border-radius:14px;font:inherit;font-weight:900;font-size:16px;color:#fff;cursor:pointer;background:linear-gradient(#8fae5c,#5e7d33)}
+  .btn.fire{background:linear-gradient(#ff9a5c,#d9482b)} .btn.ice{background:linear-gradient(#7ad0ff,#2f7fd9)} .btn.gray{background:#4a4a3a}
+  input{width:100%;box-sizing:border-box;margin-top:10px;padding:10px;border-radius:12px;border:2px solid #6b5b3a;background:#1b2417;color:#fff;font:inherit;font-size:22px;text-align:center;letter-spacing:8px}
+  .code{font-size:44px;font-weight:900;letter-spacing:10px;color:#ffd23c;margin:6px 0}
+  .small{font-size:12px!important;color:#a99f80!important;word-break:break-all}
+  #touch{position:fixed;inset:auto 0 0 0;z-index:5;display:none;justify-content:space-between;padding:0 14px calc(14px + env(safe-area-inset-bottom));pointer-events:none}
+  #touch .grp{display:flex;gap:14px}
+  #touch div.k{pointer-events:auto;width:68px;height:68px;border-radius:50%;background:rgba(255,255,255,.16);border:2px solid rgba(255,255,255,.35);
+    display:flex;align-items:center;justify-content:center;font-size:28px;color:#fff}
+  #touch div.k.on{background:rgba(255,255,255,.4)}
+  #rotate{display:none;position:fixed;inset:0;z-index:30;background:#141d12;align-items:center;justify-content:center;text-align:center;font-size:18px;font-weight:700;line-height:2}
+  @media (orientation:portrait) and (pointer:coarse){#rotate{display:flex}}
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="cv" width="960" height="600"></canvas></div>
+<div id="hud"></div>
+<a id="home" href="index.html">‹ 主页</a>
+<div id="touch"><div class="grp"><div class="k" data-k="l">◀</div><div class="k" data-k="r">▶</div></div><div class="grp"><div class="k" data-k="u">▲</div></div></div>
+<div id="panel"></div>
+<div id="rotate"><div>📱↻<br>请把手机横过来玩</div></div>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+// ---------- 常量 ----------
+const T=24,W=40,H=25,PW=16,PH=22,SPEED=170,GRAV=1800,JUMP=640,STEP=1/60;
+const ROOM_PREFIX='bjc-fireice-';
+const $=id=>document.getElementById(id);
+const cv=$('cv'),ctx=cv.getContext('2d');
+
+// ---------- 音效 ----------
+let AC;
+function tone(f,d,type='sine',v=.1,f2,delay=0){try{if(!AC)AC=new (window.AudioContext||window.webkitAudioContext)();if(AC.state==='suspended')AC.resume();
+  const o=AC.createOscillator(),g=AC.createGain(),t=AC.currentTime+delay;o.type=type;o.frequency.setValueAtTime(f,t);if(f2)o.frequency.exponentialRampToValueAtTime(f2,t+d);
+  g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(v,t+.01);g.gain.exponentialRampToValueAtTime(.001,t+d);o.connect(g).connect(AC.destination);o.start(t);o.stop(t+d);}catch(e){}}
+const SFX={jump(){tone(420,.15,'triangle',.06,820)},gem(){tone(1319,.2,'sine',.08);tone(1976,.3,'sine',.06,0,.08)},
+  die(){[392,330,262].forEach((f,i)=>tone(f,.3,'triangle',.08,0,i*.12))},win(){[523,659,784,1047].forEach((f,i)=>tone(f,.35,'sine',.08,0,i*.1))}};
+
+// ---------- 关卡 ----------
+// # 墙  F 岩浆(冰娃怕)  W 水(火娃怕)  G 毒液(都怕)  D 机关门  p 按钮  r 红宝石  b 蓝宝石  f 火门  w 冰门
+function level1(){
+  const g=[];for(let y=0;y<H;y++)g.push(Array(W).fill('.'));
+  const row=(x1,x2,y,c='#')=>{for(let x=x1;x<=x2;x++)g[y][x]=c};
+  row(0,W-1,0);row(0,W-1,H-1);for(let y=0;y<H;y++){g[y][0]='#';g[y][W-1]='#';}
+  // 地面：三个池子
+  row(10,12,24,'F');row(17,19,24,'W');row(25,26,24,'G');g[23][11]='r';g[23][18]='b';
+  // 第二层
+  row(22,34,20);g[19][26]='r';g[19][30]='b';
+  // 第三层
+  row(1,20,16);row(8,9,16,'W');row(13,14,16,'F');g[15][5]='r';g[15][17]='b';
+  // 第四层：按钮 A
+  row(19,38,12);row(26,27,12,'F');row(31,32,12,'W');g[11][23]='p';g[11][29]='r';g[11][35]='b';
+  // 顶层：机关门 + 按钮 B + 出口
+  row(1,17,8);for(let y=1;y<=7;y++)g[y][10]='D';g[7][7]='p';g[7][14]='r';g[7][15]='b';g[7][2]='f';g[7][4]='w';
+  return {g,spawn:[[2,23],[4,23]]};
+}
+function mirror(L){
+  const sw={F:'W',W:'F',r:'b',b:'r'};
+  return {g:L.g.map(r=>r.slice().reverse().map(c=>sw[c]||c)),spawn:L.spawn.map(([x,y])=>[W-1-x,y]).reverse()};
+}
+const LEVELS=[()=>level1(),()=>mirror(level1())];
+
+// ---------- 游戏状态 ----------
+let mode=null;   // 'local' | 'host' | 'guest'
+let S=null,lvl=null;
+function loadLevel(n){
+  lvl=LEVELS[n%LEVELS.length]();
+  const mk=(i,type)=>({x:lvl.spawn[i][0]*T+4,y:(lvl.spawn[i][1]+1)*T-PH,vx:0,vy:0,ground:false,type,face:1,dead:false});
+  S={lv:n,ps:[mk(0,'fire'),mk(1,'ice')],got:[],open:false,status:'play',timer:0,time:0};
+}
+const cell=(tx,ty)=>(ty<0||ty>=H||tx<0||tx>=W)?'#':lvl.g[ty][tx];
+const solid=(tx,ty)=>{const c=cell(tx,ty);return c==='#'||c==='F'||c==='W'||c==='G'||(c==='D'&&!S.open);};
+function tilesOf(p,fn){for(let ty=Math.floor(p.y/T);ty<=Math.floor((p.y+PH-.01)/T);ty++)for(let tx=Math.floor(p.x/T);tx<=Math.floor((p.x+PW-.01)/T);tx++)if(fn(tx,ty))return true;return false;}
+const hit=p=>tilesOf(p,solid);
+const lethal=(p,c)=>c==='G'||(c==='F'&&p.type==='ice')||(c==='W'&&p.type==='fire');
+
+function stepPlayer(p,inp){
+  p.vx=((inp.r?1:0)-(inp.l?1:0))*SPEED;if(p.vx)p.face=Math.sign(p.vx);
+  if(inp.u&&p.ground){p.vy=-JUMP;p.ground=false;SFX.jump();}
+  p.vy=Math.min(p.vy+GRAV*STEP,900);
+  p.x+=p.vx*STEP;
+  if(hit(p)){if(p.vx>0)p.x=Math.floor((p.x+PW)/T)*T-PW-.01;else p.x=(Math.floor(p.x/T)+1)*T;}
+  p.y+=p.vy*STEP;p.ground=false;
+  if(hit(p)){if(p.vy>0){p.y=Math.floor((p.y+PH)/T)*T-PH-.01;p.ground=true;}else p.y=(Math.floor(p.y/T)+1)*T;p.vy=0;}
+  if(p.ground){const fy=Math.floor((p.y+PH+1)/T);
+    for(const tx of [Math.floor(p.x/T),Math.floor((p.x+PW-.01)/T)])if(lethal(p,cell(tx,fy)))p.dead=true;}
+}
+function update(inputs){
+  if(S.status!=='play'){S.timer-=STEP;if(S.timer<=0)loadLevel(S.status==='win'?S.lv+1:S.lv);return;}
+  S.time+=STEP;
+  S.open=S.ps.some(p=>tilesOf(p,(x,y)=>{const c=cell(x,y);return c==='p'||c==='D';}));  // 有人站在门里时门也保持打开，避免卡死
+  S.ps.forEach((p,i)=>{
+
+    stepPlayer(p,inputs[i]);
+    tilesOf(p,(x,y)=>{const c=cell(x,y),k=y*W+x;
+      if(((c==='r'&&p.type==='fire')||(c==='b'&&p.type==='ice'))&&!S.got.includes(k)){S.got.push(k);SFX.gem();}});
+  });
+  if(S.ps.some(p=>p.dead)){S.status='dead';S.timer=1.6;SFX.die();return;}
+  const at=(p,c)=>tilesOf(p,(x,y)=>cell(x,y)===c);
+  if(at(S.ps[0],'f')&&at(S.ps[1],'w')){S.status='win';S.timer=2.2;SFX.win();}
+}
+
+// ---------- 输入 ----------
+const keys={};
+addEventListener('keydown',e=>{keys[e.code]=true;if(e.code.startsWith('Arrow')||e.code==='Space')e.preventDefault();});
+addEventListener('keyup',e=>{keys[e.code]=false;});
+addEventListener('blur',()=>{for(const k in keys)keys[k]=false;});
+const touch={l:false,r:false,u:false};
+document.querySelectorAll('#touch .k').forEach(el=>{
+  const k=el.dataset.k,set=v=>{touch[k]=v;el.classList.toggle('on',v);};
+  el.addEventListener('pointerdown',e=>{e.preventDefault();el.setPointerCapture(e.pointerId);set(true);});
+  ['pointerup','pointercancel','lostpointercapture'].forEach(ev=>el.addEventListener(ev,()=>set(false)));
+});
+const wasd=()=>({l:keys.KeyA,r:keys.KeyD,u:keys.KeyW});
+const arrows=()=>({l:keys.ArrowLeft,r:keys.ArrowRight,u:keys.ArrowUp});
+const merge=(...a)=>({l:a.some(i=>i.l),r:a.some(i=>i.r),u:a.some(i=>i.u)});
+const myInput=()=>merge(wasd(),arrows(),touch,{u:keys.Space});
+let remoteInput={l:false,r:false,u:false};
+
+// ---------- 联网 (PeerJS / WebRTC) ----------
+let peer=null,conn=null,lastSent='';
+function cleanupNet(){try{conn&&conn.close()}catch(e){}try{peer&&peer.destroy()}catch(e){}peer=conn=null;}
+function bindConn(c){
+  conn=c;
+  c.on('data',d=>{
+    if(mode==='host'&&d.t==='i')remoteInput=d;
+    if(mode==='guest'&&d.t==='s'){if(!S||d.lv!==S.lv)loadLevel(d.lv);applyState(d);}
+  });
+  c.on('close',()=>{if(mode)showPanel('lost');});
+  c.on('error',()=>{if(mode)showPanel('lost');});
+}
+function createRoom(){
+  cleanupNet();const code=String(Math.floor(1000+Math.random()*9000));
+  showPanel('wait',code);
+  peer=new Peer(ROOM_PREFIX+code);
+  peer.on('error',e=>{if(e.type==='unavailable-id')createRoom();else showPanel('err',e.type);});
+  peer.on('connection',c=>{if(conn){c.close();return;}c.on('open',()=>{bindConn(c);startGame('host');});});
+}
+function joinRoom(code){
+  code=(code||'').trim();if(!/^\d{4}$/.test(code)){alert('请输入 4 位房间号');return;}
+  cleanupNet();showPanel('joining',code);
+  peer=new Peer();
+  peer.on('open',()=>{const c=peer.connect(ROOM_PREFIX+code,{reliable:false});c.on('open',()=>{bindConn(c);startGame('guest');});});
+  peer.on('error',e=>showPanel('err',e.type==='peer-unavailable'?'房间不存在或已关闭':e.type));
+}
+function packState(){return{t:'s',lv:S.lv,st:S.status,tm:S.timer,time:S.time,open:S.open,got:S.got,
+  ps:S.ps.map(p=>[Math.round(p.x*10)/10,Math.round(p.y*10)/10,p.face,p.ground?1:0,p.dead?1:0])};}
+function applyState(d){
+  const prevGot=S.got.length,prevSt=S.status;
+  S.status=d.st;S.timer=d.tm;S.time=d.time;S.open=d.open;S.got=d.got;
+  d.ps.forEach((a,i)=>{const p=S.ps[i];p.tx=a[0];p.ty=a[1];p.face=a[2];p.ground=!!a[3];p.dead=!!a[4];
+    if(Math.abs(p.x-a[0])>60||Math.abs(p.y-a[1])>60){p.x=a[0];p.y=a[1];}});
+  if(S.got.length>prevGot)SFX.gem();
+  if(prevSt==='play'&&d.st==='dead')SFX.die();
+  if(prevSt==='play'&&d.st==='win')SFX.win();
+}
+
+// ---------- 主循环 ----------
+let acc=0,last=performance.now(),frame=0;
+function loop(now){
+  requestAnimationFrame(loop);
+  const dt=Math.min(.1,(now-last)/1000);last=now;
+  if(S&&mode){
+    if(mode==='guest'){
+      const i=myInput(),key=`${+!!i.l}${+!!i.r}${+!!i.u}`;
+      if(conn&&conn.open&&(key!==lastSent||frame%20===0)){conn.send({t:'i',l:!!i.l,r:!!i.r,u:!!i.u});lastSent=key;}
+      S.ps.forEach(p=>{if(p.tx!=null){p.x+=(p.tx-p.x)*Math.min(1,dt*18);p.y+=(p.ty-p.y)*Math.min(1,dt*18);}});
+    }else{
+      acc+=dt;
+      while(acc>=STEP){acc-=STEP;
+        const ins=mode==='local'?[merge(wasd(),touch),arrows()]:[myInput(),remoteInput];
+        update(ins);}
+      if(mode==='host'&&conn&&conn.open&&frame%2===0)conn.send(packState());
+    }
+  }
+  frame++;draw(now/1000);
+}
+
+// ---------- 绘制 ----------
+function rr(x,y,w,h,r){ctx.beginPath();ctx.roundRect?ctx.roundRect(x,y,w,h,r):ctx.rect(x,y,w,h);}
+const LIQ={F:['#ff5a1f','#ffb03c'],W:['#2f7fd9','#7ad0ff'],G:['#3fae2a','#a6f04a']};
+function draw(t){
+  ctx.fillStyle='#2b3a22';ctx.fillRect(0,0,cv.width,cv.height);
+  // 背景砖纹
+  ctx.strokeStyle='rgba(255,255,255,.035)';ctx.lineWidth=1;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++)if((x+y)%2===0)ctx.strokeRect(x*T+.5+(y%2?T/2:0),y*T+.5,T,T);
+  if(!S){return;}
+  const g=lvl.g;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const c=g[y][x],px=x*T,py=y*T;
+    if(c==='#'){ctx.fillStyle='#7a6842';ctx.fillRect(px,py,T,T);ctx.fillStyle='#8f7b50';ctx.fillRect(px,py,T,4);
+      ctx.strokeStyle='#4e4128';ctx.strokeRect(px+.5,py+.5,T-1,T-1);}
+    else if(LIQ[c]){ctx.fillStyle='#7a6842';ctx.fillRect(px,py+10,T,T-10);
+      const gr=ctx.createLinearGradient(0,py+3,0,py+12);gr.addColorStop(0,LIQ[c][1]);gr.addColorStop(1,LIQ[c][0]);ctx.fillStyle=gr;
+      ctx.beginPath();ctx.moveTo(px,py+12);for(let i=0;i<=T;i+=4)ctx.lineTo(px+i,py+4+Math.sin(t*4+(px+i)/7)*1.6);ctx.lineTo(px+T,py+12);ctx.fill();}
+    else if(c==='D'){ctx.globalAlpha=S.open?.15:1;ctx.fillStyle='#d9b23c';ctx.fillRect(px+6,py,12,T);ctx.fillStyle='#8a6d1c';ctx.fillRect(px+6,py+T-4,12,2);ctx.globalAlpha=1;}
+    else if(c==='p'){ctx.fillStyle='#d9b23c';rr(px+3,py+(S.open?T-4:T-7),T-6,8,3);ctx.fill();}
+    else if((c==='r'||c==='b')&&!S.got.includes(y*W+x)){
+      const cx=px+T/2,cy=py+T/2+Math.sin(t*3+x)*2;ctx.fillStyle=c==='r'?'#ff4a5c':'#3cb4ff';
+      ctx.beginPath();ctx.moveTo(cx,cy-8);ctx.lineTo(cx+7,cy-2);ctx.lineTo(cx,cy+8);ctx.lineTo(cx-7,cy-2);ctx.closePath();ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,.6)';ctx.fillRect(cx-3,cy-4,3,3);}
+    else if(c==='f'||c==='w'){
+      ctx.fillStyle=c==='f'?'#a8331a':'#1c4e8f';rr(px-4,py-20,T+8,T+20,[14,14,0,0]);ctx.fill();
+      ctx.fillStyle='#1a1a12';rr(px,py-14,T,T+14,[11,11,0,0]);ctx.fill();
+      ctx.font='16px sans-serif';ctx.textAlign='center';ctx.fillText(c==='f'?'🔥':'💧',px+T/2,py+4);}
+  }
+  S.ps.forEach((p,i)=>drawPlayer(p,i,t));
+  // 状态文字
+  const m=S.status==='dead'?'啊哦～再来一次':S.status==='win'?'过关啦！🎉':'';
+  if(m){ctx.fillStyle='rgba(0,0,0,.45)';ctx.fillRect(0,cv.height/2-40,cv.width,80);ctx.fillStyle='#fff';ctx.font='900 36px "Zen Maru Gothic",sans-serif';ctx.textAlign='center';ctx.fillText(m,cv.width/2,cv.height/2+12);}
+  const total=lvl.g.flat().filter(c=>c==='r'||c==='b').length;
+  $('hud').textContent=`第 ${S.lv+1} 关  ·  💎 ${S.got.length}/${total}  ·  ⏱ ${Math.floor(S.time)}s`;
+}
+function drawPlayer(p,i,t){
+  const fire=p.type==='fire',x=p.x,y=p.y,bob=p.ground&&Math.abs(p.vx||0)>0?Math.sin(t*20)*1:0;
+  ctx.save();if(p.dead)ctx.globalAlpha=.4;
+  // 头顶火焰/水滴
+  ctx.fillStyle=fire?'#ffb03c':'#9fe0ff';ctx.beginPath();
+  const hx=x+PW/2,hy=y+4+bob;
+  if(fire){ctx.moveTo(hx-8,hy);ctx.quadraticCurveTo(hx-8,hy-12,hx-2,hy-16+Math.sin(t*12)*2);ctx.quadraticCurveTo(hx,hy-8,hx+3,hy-12);ctx.quadraticCurveTo(hx+9,hy-6,hx+8,hy);}
+  else{ctx.moveTo(hx,hy-15);ctx.quadraticCurveTo(hx+9,hy-3,hx+8,hy);ctx.lineTo(hx-8,hy);ctx.quadraticCurveTo(hx-9,hy-3,hx,hy-15);}
+  ctx.fill();
+  ctx.fillStyle=fire?'#e8432a':'#2f8fe0';rr(x-1,y+2+bob,PW+2,PH-2,7);ctx.fill();
+  ctx.fillStyle='#fff';const ex=x+PW/2+p.face*3;ctx.fillRect(ex-5,y+8+bob,4,5);ctx.fillRect(ex+1,y+8+bob,4,5);
+  ctx.fillStyle='#111';ctx.fillRect(ex-4+p.face,y+9+bob,2,3);ctx.fillRect(ex+2+p.face,y+9+bob,2,3);
+  ctx.restore();
+  const me=(mode==='host'&&i===0)||(mode==='guest'&&i===1);
+  if(me){ctx.fillStyle='#fff';ctx.font='700 12px sans-serif';ctx.textAlign='center';ctx.fillText('▼ 你',x+PW/2,y-18);}
+}
+
+// ---------- 自适应缩放 ----------
+function fit(){const s=Math.min(innerWidth/cv.width,(innerHeight-28)/cv.height);cv.style.width=cv.width*s+'px';cv.style.height=cv.height*s+'px';}
+addEventListener('resize',fit);fit();
+const isTouch=matchMedia('(pointer:coarse)').matches||'ontouchstart' in window;
+
+// ---------- 面板 ----------
+function showPanel(kind,arg){
+  const P=$('panel');P.classList.remove('hide');$('touch').style.display='none';
+  const link=location.href.split('?')[0]+'?room='+arg;
+  const html={
+    menu:`<h1>冰火人</h1><p>🔥 火娃怕水 · 💧 冰娃怕岩浆 · 绿色毒液都怕<br>收集宝石，两人同时站到各自的门口就过关</p>
+      <button class="btn fire" id="bCreate">创建房间（你是火娃）</button>
+      <input id="iCode" inputmode="numeric" maxlength="4" placeholder="房间号">
+      <button class="btn ice" id="bJoin">加入房间（你是冰娃）</button>
+      <button class="btn gray" id="bLocal">同一台电脑双人</button>
+      <p class="small">${isTouch?'手机：左下 ◀ ▶ 移动，右下 ▲ 跳跃，建议横屏':'联网：方向键或 WASD 都可以<br>同屏：火娃 WASD，冰娃 方向键'}</p>`,
+    wait:`<h1>等待好友</h1><p>把房间号告诉好友：</p><div class="code">${arg}</div>
+      <p class="small">或者发送链接：<br>${link}</p><button class="btn" id="bCopy">复制链接</button><button class="btn gray" id="bBack">返回</button>`,
+    joining:`<h1>连接中…</h1><p>正在加入房间 ${arg}</p><button class="btn gray" id="bBack">返回</button>`,
+    err:`<h1>出错了</h1><p>${arg}</p><button class="btn gray" id="bBack">返回</button>`,
+    lost:`<h1>断开了</h1><p>对方已离开或网络中断</p><button class="btn gray" id="bBack">返回</button>`,
+  }[kind];
+  P.innerHTML=`<div class="card">${html}</div>`;
+  if(kind!=='menu'&&kind!=='wait'&&kind!=='joining')mode=null;
+  const on=(id,fn)=>{const el=$(id);if(el)el.onclick=fn;};
+  on('bCreate',createRoom);on('bJoin',()=>joinRoom($('iCode').value));on('bLocal',()=>{cleanupNet();startGame('local');});
+  on('bBack',()=>{cleanupNet();mode=null;showPanel('menu');});
+  on('bCopy',()=>{navigator.clipboard?.writeText(link).then(()=>{$('bCopy').textContent='已复制 ✓';},()=>{});});
+  const ic=$('iCode');if(ic)ic.onkeydown=e=>{if(e.key==='Enter')joinRoom(ic.value);};
+}
+function startGame(m){
+  mode=m;remoteInput={l:false,r:false,u:false};loadLevel(0);acc=0;
+  $('panel').classList.add('hide');$('touch').style.display=isTouch?'flex':'none';
+  tone(784,.2,'sine',.06);
+}
+
+const qRoom=new URLSearchParams(location.search).get('room');
+if(qRoom)joinRoom(qRoom);else showPanel('menu');
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
