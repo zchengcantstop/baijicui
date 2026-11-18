@@ -23,6 +23,10 @@
   input{width:100%;box-sizing:border-box;margin-top:10px;padding:10px;border-radius:12px;border:2px solid #6b5b3a;background:#1b2417;color:#fff;font:inherit;font-size:22px;text-align:center;letter-spacing:8px}
   .code{font-size:44px;font-weight:900;letter-spacing:10px;color:#ffd23c;margin:6px 0}
   .small{font-size:12px!important;color:#a99f80!important;word-break:break-all}
+  .ta{width:100%;box-sizing:border-box;height:84px;margin:8px 0;padding:8px;border-radius:12px;border:2px solid #6b5b3a;background:#1b2417;color:#ffd23c;
+    font:11px/1.4 ui-monospace,Consolas,monospace;word-break:break-all;resize:none}
+  details.more{margin-top:14px;text-align:left}
+  details.more summary{cursor:pointer;font-size:13px;color:#a99f80;text-align:center;padding:6px}
   #touch{position:fixed;inset:auto 0 0 0;z-index:5;display:none;justify-content:space-between;padding:0 14px calc(14px + env(safe-area-inset-bottom));pointer-events:none}
   #touch .grp{display:flex;gap:14px}
   #touch div.k{pointer-events:auto;width:68px;height:68px;border-radius:50%;background:rgba(255,255,255,.16);border:2px solid rgba(255,255,255,.35);
@@ -135,12 +139,99 @@ const merge=(...a)=>({l:a.some(i=>i.l),r:a.some(i=>i.r),u:a.some(i=>i.u)});
 const myInput=()=>merge(wasd(),arrows(),touch,{u:keys.Space});
 let remoteInput={l:false,r:false,u:false};
 
-// ---------- 联网（公共 MQTT 服务器中转，手机流量/不同 WiFi 都能连） ----------
+// ---------- 联网 ----------
+// 主路径：手动信令 + WebRTC 点对点直连（不经过任何服务器，同一个 WiFi／热点下最稳）
+// 备选：公共 MQTT 房间号（要能访问 broker.emqx.io）
 const BROKER='wss://broker.emqx.io:8084/mqtt';
+
+function b64e(s){let b='';const u=new TextEncoder().encode(s);for(const x of u)b+=String.fromCharCode(x);
+  return btoa(b).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+function b64d(s){const p=atob(s.replace(/-/g,'+').replace(/_/g,'/'));const u=new Uint8Array(p.length);
+  for(let i=0;i<p.length;i++)u[i]=p.charCodeAt(i);return new TextDecoder().decode(u);}
+const wrapSdp=d=>b64e(JSON.stringify({v:1,e:d.sdp}));
+
+// ---- WebRTC 点对点 ----
+let pc=null,dc=null,rtcTimer=null,rtcRole=null;
+function rtcOpen(){return !!dc&&dc.readyState==='open';}
+function rtcSend(o){if(!rtcOpen())return;try{dc.send(JSON.stringify(o))}catch(e){}}
+function rtcTeardown(){
+  clearTimeout(rtcTimer);rtcTimer=null;
+  const oldDc=dc,oldPc=pc;
+  dc=pc=null;rtcRole=null;
+  if(oldDc){oldDc.onmessage=oldDc.onopen=oldDc.onclose=null;try{oldDc.close()}catch(e){}}
+  if(oldPc){oldPc.ondatachannel=oldPc.onconnectionstatechange=null;try{oldPc.close()}catch(e){}}
+}
+function rtcInit(role){
+  rtcTeardown();
+  rtcRole=role;
+  const p=pc=new RTCPeerConnection({iceServers:[]});   // 局域网/热点直连不需要 STUN
+  p.ondatachannel=e=>rtcBind(e.channel);
+  p.onconnectionstatechange=()=>{
+    if(pc!==p)return;
+    if(p.connectionState==='connected'){clearTimeout(rtcTimer);rtcTimer=null;}
+    else if(p.connectionState==='failed')showPanel('err','两台设备没能直连。<br>请确认连的是同一个 WiFi／热点、没开 VPN，然后重新来一次');
+  };
+  return p;
+}
+function rtcBind(ch){
+  dc=ch;
+  ch.onmessage=e=>{let d;try{d=JSON.parse(e.data)}catch(err){return}lastRecv=performance.now();onData(d);};
+  ch.onclose=()=>{if(mode&&mode!=='local')showPanel('lost');};
+  ch.onopen=()=>{if(rtcRole==='host')startGame('host');else if(rtcRole==='guest'){lastSent='';startGame('guest');rtcSend({t:'i',l:false,r:false,u:false});}};
+}
+function waitIce(p){   // 本机地址一般 1 秒内收集完，别让用户干等
+  return new Promise(res=>{
+    if(p.iceGatheringState==='complete')return res();
+    const done=()=>{if(p.iceGatheringState==='complete'){p.removeEventListener('icegatheringstatechange',done);res();}};
+    p.addEventListener('icegatheringstatechange',done);
+    setTimeout(res,3500);
+  });
+}
+async function startHost(){
+  showPanel('hosting','正在生成本机连接码…');
+  const p=rtcInit('host');
+  rtcBind(p.createDataChannel('game',{ordered:false,maxRetransmits:0}));
+  const offer=await p.createOffer();
+  await p.setLocalDescription(offer);
+  await waitIce(p);
+  if(pc!==p)return;
+  showPanel('hostCode',wrapSdp(p.localDescription));
+  rtcTimer=setTimeout(()=>{if(!rtcOpen()){rtcTeardown();showPanel('err','等待超时，重新来一次吧');}},1000*60*5);
+}
+function parseCode(code){
+  const s=String(code||'').replace(/\s+/g,'');
+  let d;try{d=JSON.parse(b64d(s))}catch(e){return null}
+  return d&&typeof d.e==='string'?d:null;
+}
+async function acceptAnswer(code){
+  const p=pc;
+  if(!p)return showPanel('err','连接码已经失效，请重新创建');
+  if(p.signalingState!=='have-local-offer')return showPanel('err','这局已经连上了，或者连接码已失效，请返回重来');
+  const d=parseCode(code);
+  if(!d)return showPanel('err','连接码不正确，请让对方重新复制一遍');
+  try{await p.setRemoteDescription({type:'answer',sdp:d.e});}catch(e){return showPanel('err','连接码不正确，请重新来一次')}
+  showPanel('linking','正在握手…');
+}
+async function joinByCode(code){
+  const d=parseCode(code);
+  if(!d)return showPanel('err','连接码不正确，请让房主重新复制一遍');
+  showPanel('linking','正在握手…');
+  const p=rtcInit('guest');
+  try{
+    await p.setRemoteDescription({type:'offer',sdp:d.e});
+    await p.setLocalDescription(await p.createAnswer());
+    await waitIce(p);
+    if(pc!==p)return;
+    showPanel('guestCode',wrapSdp(p.localDescription));
+  }catch(e){showPanel('err','握手失败：'+e.message)}
+}
+
+// ---- 公共 MQTT 房间号（备选） ----
 let client=null,conn=null,pending=null,lastSent='',lastRecv=0;
-function cleanupNet(){try{client&&client.end(true)}catch(e){}client=conn=pending=null;}
+function cleanupNet(){try{client&&client.end(true)}catch(e){}client=conn=pending=null;rtcTeardown();}
 function connect(code,role,onReady){
   cleanupNet();
+  if(typeof mqtt==='undefined'){showPanel('err','公网联机需要加载 MQTT 库，当前加载失败。<br>直接用「我是房主 / 我加入」的直连方式吧');return null;}
   const base='bjc/fireice/'+code+'/',mine=base+(role==='host'?'h':'g'),theirs=base+(role==='host'?'g':'h');
   const c=client=mqtt.connect(BROKER,{clean:true,connectTimeout:8000,reconnectPeriod:2000});
   c.on('connect',()=>{c.subscribe(theirs);if(onReady){onReady();onReady=null;}});
@@ -149,10 +240,12 @@ function connect(code,role,onReady){
   const link={send:o=>{if(c.connected)c.publish(mine,JSON.stringify(o));},get open(){return c.connected;}};
   pending={role,link};return link;
 }
+function netOpen(){return rtcOpen()||!!(conn&&conn.open);}
+function netSend(o){if(rtcOpen())rtcSend(o);else if(conn&&conn.open)conn.send(o);}
 function onData(d){
   if(d.t==='hi'&&pending&&pending.role==='host'){conn=pending.link;conn.send({t:'ok'});if(mode!=='host')startGame('host');}
   else if(d.t==='ok'&&pending&&pending.role==='guest'&&!conn){conn=pending.link;startGame('guest');}
-  else if(mode==='host'&&d.t==='i')remoteInput=d;
+  else if((mode==='host'||mode===null)&&d.t==='i'){remoteInput={l:!!d.l,r:!!d.r,u:!!d.u};if(mode!=='host')startGame('host');}
   else if(mode==='guest'&&d.t==='s'){if(!S||d.lv!==S.lv)loadLevel(d.lv);applyState(d);}
 }
 function createRoom(){
@@ -190,16 +283,16 @@ function loop(now){
   if(S&&mode){
     if(mode==='guest'){
       const i=myInput(),key=`${+!!i.l}${+!!i.r}${+!!i.u}`;
-      if(conn&&conn.open&&(key!==lastSent||frame%20===0)){conn.send({t:'i',l:!!i.l,r:!!i.r,u:!!i.u});lastSent=key;}
+      if(netOpen()&&(key!==lastSent||frame%20===0)){netSend({t:'i',l:!!i.l,r:!!i.r,u:!!i.u});lastSent=key;}
       S.ps.forEach(p=>{if(p.tx!=null){p.x+=(p.tx-p.x)*Math.min(1,dt*18);p.y+=(p.ty-p.y)*Math.min(1,dt*18);}});
     }else{
       acc+=dt;
       while(acc>=STEP){acc-=STEP;
         const ins=mode==='local'?[merge(wasd(),touch),arrows()]:[myInput(),remoteInput];
         update(ins);}
-      if(mode==='host'&&conn&&conn.open&&frame%3===0)conn.send(packState());
+      if(mode==='host'&&netOpen()&&frame%3===0)netSend(packState());
     }
-    if(mode!=='local'&&conn&&performance.now()-lastRecv>6000){cleanupNet();showPanel('lost');}
+    if(mode!=='local'&&netOpen()&&performance.now()-lastRecv>6000){cleanupNet();showPanel('lost');}
   }
   frame++;draw(now/1000);
 }
@@ -272,11 +365,38 @@ function showPanel(kind,arg){
   const link=location.href.split('?')[0]+'?room='+arg;
   const html={
     menu:`<h1>冰火人</h1><p>🔥 火娃怕水 · 💧 冰娃怕岩浆 · 绿色毒液都怕<br>收集宝石，两人同时站到各自的门口就过关</p>
+      <button class="btn fire" id="bHost">① 我是房主（火娃）</button>
+      <button class="btn ice" id="bJoinDirect">② 我加入（冰娃）</button>
+      <button class="btn gray" id="bLocal">同一台电脑双人</button>
+      <details class="more"><summary>其他联机方式</summary>
+        <button class="btn gray" id="bRoom">公网房间号联机</button>
+        <p class="small">需要能访问 broker.emqx.io</p>
+      </details>
+      <p class="small">直连方式：两人连同一个 WiFi／热点，房主点①把「连接码」发给对方，<br>对方点②粘贴后回传「应答码」，房主粘回去就开局。<br>全程不经过服务器，也不需要外网。</p>
+      <p class="small">${isTouch?'手机：左下 ◀ ▶ 移动，右下 ▲ 跳跃，建议横屏':'联网：方向键或 WASD 都可以<br>同屏：火娃 WASD，冰娃 方向键'}</p>`,
+    hosting:`<h1>生成中</h1><p>${arg}</p>`,
+    hostCode:`<h1>① 连接码</h1><p>把这串码发给另一位玩家：</p>
+      <textarea class="ta" id="tOffer" readonly>${arg}</textarea>
+      <button class="btn" id="bCopyOffer">复制连接码</button>
+      <p class="small">对方在「我加入」里粘贴它，会得到一串应答码，你粘到下面就算连上：</p>
+      <textarea class="ta" id="iAns" placeholder="粘贴对方的应答码"></textarea>
+      <button class="btn ice" id="bAccept">连接</button>
+      <button class="btn gray" id="bBack">返回</button>`,
+    guestCode:`<h1>② 应答码</h1><p>把这串码回传给房主：</p>
+      <textarea class="ta" id="tAns" readonly>${arg}</textarea>
+      <button class="btn" id="bCopyAns">复制应答码</button>
+      <p class="small">房主粘进去之后会自动开局，等着就好</p>
+      <button class="btn gray" id="bBack">返回</button>`,
+    joinCode:`<h1>② 我加入</h1><p>粘贴房主给你的连接码：</p>
+      <textarea class="ta" id="iOffer" placeholder="粘贴连接码"></textarea>
+      <button class="btn ice" id="bGo">下一步</button>
+      <button class="btn gray" id="bBack">返回</button>`,
+    linking:`<h1>${arg||'连接中…'}</h1><p class="small">正在建立点对点连接…</p>`,
+    roomMenu:`<h1>公网房间</h1><p>房主创建房间后把 4 位号码告诉对方</p>
       <button class="btn fire" id="bCreate">创建房间（你是火娃）</button>
       <input id="iCode" inputmode="numeric" maxlength="4" placeholder="房间号">
       <button class="btn ice" id="bJoin">加入房间（你是冰娃）</button>
-      <button class="btn gray" id="bLocal">同一台电脑双人</button>
-      <p class="small">${isTouch?'手机：左下 ◀ ▶ 移动，右下 ▲ 跳跃，建议横屏':'联网：方向键或 WASD 都可以<br>同屏：火娃 WASD，冰娃 方向键'}</p>`,
+      <button class="btn gray" id="bBack">返回</button>`,
     wait:`<h1>等待好友</h1><p>把房间号告诉好友：</p><div class="code">${arg}</div>
       <p class="small">或者发送链接：<br>${link}</p><button class="btn" id="bCopy">复制链接</button><button class="btn gray" id="bBack">返回</button>`,
     joining:`<h1>连接中…</h1><p>正在加入房间 ${arg}</p><button class="btn gray" id="bBack">返回</button>`,
@@ -284,15 +404,36 @@ function showPanel(kind,arg){
     lost:`<h1>断开了</h1><p>对方已离开或网络中断</p><button class="btn gray" id="bBack">返回</button>`,
   }[kind];
   P.innerHTML=`<div class="card">${html}</div>`;
-  if(kind!=='menu'&&kind!=='wait'&&kind!=='joining')mode=null;
+  // 只有在真正回到菜单/出错/切到别的联机方式时才拆连接，交换连接码的过程中必须保留 pc
+  const KEEP=['hosting','hostCode','guestCode','linking','joinCode'];
+  if(!KEEP.includes(kind)){
+    if(kind!=='wait'&&kind!=='joining')mode=null;
+    rtcTeardown();
+    if(kind==='menu'||kind==='err'||kind==='lost'||kind==='roomMenu')cleanupNet();
+  }
   const on=(id,fn)=>{const el=$(id);if(el)el.onclick=fn;};
-  on('bCreate',createRoom);on('bJoin',()=>joinRoom($('iCode').value));on('bLocal',()=>{cleanupNet();startGame('local');});
+  const copy=(tid,bid)=>{const t=$(tid);if(!t)return;
+    const done=()=>{const b=$(bid);if(b)b.textContent='已复制 ✓';};
+    navigator.clipboard?.writeText(t.value).then(done,()=>{t.removeAttribute('readonly');t.select();try{document.execCommand('copy');done();}catch(e){}});};
+  on('bHost',startHost);
+  on('bJoinDirect',()=>showPanel('joinCode'));
+  on('bLocal',()=>{cleanupNet();startGame('local');});
+  on('bRoom',()=>showPanel('roomMenu'));
+  on('bGo',()=>{const el=$('iOffer');if(el)joinByCode(el.value);});
+  on('bCopyOffer',()=>copy('tOffer','bCopyOffer'));
+  on('bCopyAns',()=>copy('tAns','bCopyAns'));
+  on('bAccept',()=>{const el=$('iAns');if(el)acceptAnswer(el.value);});
+  on('bCreate',createRoom);
   on('bBack',()=>{cleanupNet();mode=null;showPanel('menu');});
   on('bCopy',()=>{navigator.clipboard?.writeText(link).then(()=>{$('bCopy').textContent='已复制 ✓';},()=>{});});
-  const ic=$('iCode');if(ic)ic.onkeydown=e=>{if(e.key==='Enter')joinRoom(ic.value);};
+  const ic=$('iCode');
+  if(ic){ic.onkeydown=e=>{if(e.key==='Enter')joinRoom(ic.value);};
+    if(kind==='roomMenu'){const bj=$('bJoin');if(bj)bj.onclick=()=>joinRoom(ic.value);}}
+  const ia=$('iAns');if(ia)ia.onkeydown=e=>{if(e.key==='Enter')acceptAnswer(ia.value);};
 }
 function startGame(m){
   mode=m;lastRecv=performance.now();remoteInput={l:false,r:false,u:false};loadLevel(0);acc=0;
+  clearTimeout(rtcTimer);
   $('panel').classList.add('hide');$('touch').style.display=isTouch?'flex':'none';
   tone(784,.2,'sine',.06);
 }
