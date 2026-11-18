@@ -43,7 +43,22 @@
 <div id="touch"><div class="grp"><div class="k" data-k="l">◀</div><div class="k" data-k="r">▶</div></div><div class="grp"><div class="k" data-k="u">▲</div></div></div>
 <div id="panel"></div>
 </div>
-<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<script>
+// ---------- 加载 MQTT 库（多 CDN 依次回退：unpkg 在部分网络下不通） ----------
+window.MQTT_SOURCES=[
+  'https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.10.1/mqtt.min.js',
+  'https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js'
+];
+(function loadMqtt(i){
+  if(window.mqtt)return;
+  if(i>=window.MQTT_SOURCES.length){window.MQTT_FAILED=true;return;}
+  const s=document.createElement('script');s.src=window.MQTT_SOURCES[i];s.async=true;
+  s.onload=()=>{if(!window.mqtt)loadMqtt(i+1);};
+  s.onerror=()=>loadMqtt(i+1);
+  document.head.appendChild(s);
+})(0);
+</script>
 <script>
 // ---------- 常量 ----------
 const T=24,W=40,H=25,PW=16,PH=22,SPEED=170,GRAV=1800,JUMP=640,STEP=1/60;
@@ -141,8 +156,10 @@ let remoteInput={l:false,r:false,u:false};
 
 // ---------- 联网 ----------
 // 主路径：手动信令 + WebRTC 点对点直连（不经过任何服务器，同一个 WiFi／热点下最稳）
-// 备选：公共 MQTT 房间号（要能访问 broker.emqx.io）
-const BROKER='wss://broker.emqx.io:8084/mqtt';
+// 备选：公共 MQTT 房间号（国内节点优先，连不上自动换下一个）
+const BROKERS=['wss://broker-cn.emqx.io:8084/mqtt','wss://broker.emqx.io:8084/mqtt','wss://broker.hivemq.com:8884/mqtt'];
+const BROKER=BROKERS[0];
+let brokerIdx=0;
 
 function b64e(s){let b='';const u=new TextEncoder().encode(s);for(const x of u)b+=String.fromCharCode(x);
   return btoa(b).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
@@ -229,14 +246,25 @@ async function joinByCode(code){
 // ---- 公共 MQTT 房间号（备选） ----
 let client=null,conn=null,pending=null,lastSent='',lastRecv=0;
 function cleanupNet(){try{client&&client.end(true)}catch(e){}client=conn=pending=null;rtcTeardown();}
-function connect(code,role,onReady){
+function connect(code,role,onReady,tryIdx=0){
   cleanupNet();
-  if(typeof mqtt==='undefined'){showPanel('err','公网联机需要加载 MQTT 库，当前加载失败。<br>直接用「我是房主 / 我加入」的直连方式吧');return null;}
+  if(typeof mqtt==='undefined'){
+    const msg=window.MQTT_FAILED?'MQTT 库加载失败（几个 CDN 都不通）。<br>请直接用「我是房主 / 我加入」的直连方式':'MQTT 库还在加载，稍等一下再试';
+    showPanel('err',msg);return null;}
+  const url=BROKERS[tryIdx%BROKERS.length];
   const base='bjc/fireice/'+code+'/',mine=base+(role==='host'?'h':'g'),theirs=base+(role==='host'?'g':'h');
-  const c=client=mqtt.connect(BROKER,{clean:true,connectTimeout:8000,reconnectPeriod:2000});
+  const c=client=mqtt.connect(url,{clean:true,connectTimeout:8000,reconnectPeriod:0});
+  let failed=false;
+  const retry=why=>{
+    if(failed||client!==c)return;failed=true;
+    try{c.end(true)}catch(e){}
+    if(tryIdx+1>=BROKERS.length){showPanel('err','三个公共服务器都连不上（'+why+'）。<br>换用「我是房主 / 我加入」的直连方式，或者换个网络再试');return;}
+    connect(code,role,onReady,tryIdx+1);   // 下一个服务器
+  };
   c.on('connect',()=>{c.subscribe(theirs);if(onReady){onReady();onReady=null;}});
   c.on('message',(t,buf)=>{if(client!==c)return;let d;try{d=JSON.parse(buf)}catch(e){return}lastRecv=performance.now();onData(d);});
-  c.on('error',e=>{if(client===c&&!conn)showPanel('err','连不上服务器：'+e.message);});
+  c.on('error',e=>{if(client===c&&!conn)retry(e.message||'error');});
+  c.on('close',()=>{if(client===c&&!conn)setTimeout(()=>retry('连接被关闭'),1500);});
   const link={send:o=>{if(c.connected)c.publish(mine,JSON.stringify(o));},get open(){return c.connected;}};
   pending={role,link};return link;
 }
